@@ -1,0 +1,61 @@
+{
+  "release": {
+    "version": "0.1.0-early.1",
+    "profile": "user",
+    "channel": "early",
+    "updates": {
+      "enabled": true,
+      "check_on_startup": true,
+      "manifest_url": "https://github.com/drbahadirsahin/data-extractor/releases/latest/download/update_manifest.json",
+      "timeout_seconds": 8
+    },
+    "features": {
+      "show_advanced_ui": false,
+      "show_model_settings": false
+    }
+  },
+  "system_prompt": "You are a clinical information extraction engine. You extract structured data from Turkish medical text and return JSON only. Do not invent values. Always preserve evidence. When a field has special instructions, follow them carefully. Always follow the field instructions in prompt_append if they exist. If there are multiple candidates for a field, use the selection_rule to choose the best candidate. If selection_rule is 'manual_review', mark the field for manual review and provide candidates in the number of max_candidates specified with their evidence.",
+  "instructions": [
+    "Bir alan için birden fazla aday değer varsa 'max_candidates' parametresi ile belirtilen sayıda adayı 'cadidates' listesine ekle.",
+    "final_value selection_rule'a göre seçilsin.",
+    "Seçim güvenli değilse needs_review true olsun.",
+    "Sadece JSON döndür.",
+    "'evidence' en fazla 80 karakterlik kısa alıntı olsun.",
+    "Eğer bir field için max_candidates tanımlıysa, en fazla o kadar candidate döndür.",
+    "selection_rule latest, earliest, highest veya lowest ise tüm adayları listeleme; yalnızca final seçime en ilgili birkaç adayı döndür."
+  ],
+  "llm": {
+    "provider": "openai_compatible",
+    "base_url": "https://openrouter.ai/api/v1",
+    "model": "google/gemma-3-27b-it",
+    "temperature": 0,
+    "max_tokens": 8192,
+    "timeout_seconds": 120,
+    "api_key_secret_name": "llm_api_key",
+    "use_json_schema": true
+  },
+  "redcap": {
+    "api_url": "",
+    "allow_api_url_edit": false
+  },
+  "identity_registry": {
+    "api_url": "",
+    "prefix": "tc_hash",
+    "lookup_action": "lookup-record-by-tc",
+    "create_action": "create-record-by-tc",
+    "tc_field": "tc_identity",
+    "record_id_field": "record",
+    "timeout_seconds": 30
+  },
+  "ui": {
+    "mode": "clinical"
+  },
+  "extractable_types": [
+    "text",
+    "dropdown",
+    "radio",
+    "checkbox",
+    "yesno"
+  ],
+  "default_batch_size": 10
+}

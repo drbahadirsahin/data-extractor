@@ -1,0 +1,52 @@
+{
+  "project_name": "",
+  "project_id": "",
+  "dictionary_path": "",
+  "target_forms": [],
+  "target_fields": [],
+  "llm": {
+    "provider": "openai_compatible",
+    "base_url": "https://openrouter.ai/api/v1",
+    "model": "google/gemma-3-27b-it",
+    "temperature": 0,
+    "max_tokens": 8192,
+    "timeout_seconds": 120,
+    "api_key_secret_name": "llm_api_key",
+    "use_json_schema": true
+  },
+  "dictionary_legend": {
+    "field_name": "Variable / Field Name",
+    "form_name": "Form Name",
+    "section_header": "Section Header",
+    "field_type": "Field Type",
+    "field_label": "Field Label",
+    "choices": "Choices, Calculations, OR Slider Labels",
+    "field_note": "Field Note",
+    "text_validation": "Text Validation Type OR Show Slider Number",
+    "text_validation_min": "Text Validation Min",
+    "text_validation_max": "Text Validation Max",
+    "identifier": "Identifier?",
+    "branching_logic": "Branching Logic (Show field only if...)",
+    "required": "Required Field?",
+    "custom_alignment": "Custom Alignment",
+    "question_number": "Question Number (surveys only)",
+    "matrix_group_name": "Matrix Group Name",
+    "matrix_ranking": "Matrix Ranking?",
+    "field_annotation": "Field Annotation"
+  },
+  "repeating_forms": [],
+  "prompting": {
+    "language": "tr",
+    "instructions": [
+      "Aşağıdaki Türkçe klinik metinden sadece verilen alanları çıkar.",
+      "Bilgi yoksa null döndür. Tahmin etme.",
+      "Her alan için kısa bir kanıt alıntısı ver.",
+      "Kodlu alanlarda önce klinik anlamı bul, ardından en uygun kodlanmış değeri seç.",
+      "Yalnızca geçerli JSON döndür. Açıklama yazma."
+    ]
+  },
+  "batch_size": 15,
+  "append_fields": [],
+  "field_overrides": {},
+  "form_overrides": {}
+}

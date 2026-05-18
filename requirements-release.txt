@@ -1,0 +1,7 @@
+PyInstaller>=6.0
+PySide6
+openpyxl
+pandas
+pydantic
+pypdf
+olefile

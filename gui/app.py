@@ -2,30 +2,29 @@ from __future__ import annotations
 
 import sys
 import os
+import logging
 
 from release_profile import app_version
 from runtime_context import bootstrap_runtime
+from startup_logging import install_startup_logging, log_exception
 
 
 def launch_gui(argv: list[str] | None = None) -> int:
     try:
-        from PySide6.QtCore import QLibraryInfo, QLocale, QTranslator
+        from PySide6.QtCore import QLibraryInfo, QLocale, QTimer, QTranslator
         from PySide6.QtWidgets import QApplication
     except ImportError as exc:
         raise RuntimeError(
             "PySide6 is not installed. Install PySide6 to run the desktop GUI."
         ) from exc
 
+    log_path = install_startup_logging()
+    logging.info("Launching LLM Extractor")
     runtime = bootstrap_runtime()
     app = QApplication(argv or sys.argv)
     install_qt_translations(app, runtime.settings.ui.language, QLibraryInfo, QLocale, QTranslator)
     app.setApplicationName("LLM Extractor")
     app.setApplicationVersion(app_version(runtime.app_config))
-
-    from gui.startup_update import run_startup_update_check
-
-    if run_startup_update_check(app, runtime):
-        return 0
 
     if resolve_ui_mode(runtime.app_config, argv or sys.argv) == "legacy":
         from gui.main_window import MainWindow
@@ -40,6 +39,11 @@ def launch_gui(argv: list[str] | None = None) -> int:
         app.setStyleSheet(CLINICAL_STYLE)
         window = ClinicalMainWindow(runtime)
     window.show()
+    activate_window(window)
+    QTimer.singleShot(250, lambda: activate_window(window))
+    QTimer.singleShot(750, lambda: activate_window(window))
+    QTimer.singleShot(1000, lambda: run_deferred_update_check(app, runtime))
+    logging.info("Main window shown; log file: %s", log_path)
     return app.exec()
 
 
@@ -73,3 +77,22 @@ def normalize_ui_mode(value: str) -> str:
     if normalized in {"legacy", "dev", "developer", "advanced"}:
         return "legacy"
     return "clinical"
+
+
+def activate_window(window) -> None:
+    target = getattr(window, "_window", window)
+    try:
+        target.showNormal()
+        target.raise_()
+        target.activateWindow()
+    except RuntimeError:
+        logging.exception("Could not activate main window")
+
+
+def run_deferred_update_check(app, runtime) -> None:
+    try:
+        from gui.startup_update import run_startup_update_check
+
+        run_startup_update_check(app, runtime)
+    except Exception as exc:
+        log_exception("Deferred update check failed", exc)

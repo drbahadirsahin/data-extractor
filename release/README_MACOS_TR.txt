@@ -23,3 +23,13 @@ Not:
 Uygulamayı tek başına /Applications içine taşımak yerine, zipten çıkan klasörün
 içinde çalıştırmanız önerilir. Bu erken sürüm taşınabilir veri klasörünü aynı
 paket klasörü içinde tutacak şekilde tasarlanmıştır.
+
+Uygulama açılır gibi olup pencere göstermeden kapanırsa şu log dosyasını
+kontrol edin:
+
+LLMExtractor-...-macos-arm64/.llm_extractor_data/llm_extractor.log
+
+Uygulamayı .app dosyasını tek başına başka bir yere taşıyarak çalıştırdıysanız
+log şu konumda olabilir:
+
+~/Library/Application Support/LLMExtractor/llm_extractor.log

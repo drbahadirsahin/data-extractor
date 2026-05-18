@@ -38,6 +38,7 @@ jobs:
         with:
           python-version: "3.13"
           cache: pip
+          cache-dependency-path: requirements-release.txt
 
       - name: Install release dependencies
         run: python -m pip install -r requirements-release.txt

@@ -6,7 +6,14 @@ from unittest.mock import patch
 
 from runtime_context import bootstrap_runtime
 from secrets_store import SecretsStore
-from settings_store import AppSettings, RedcapProjectToken, SettingsStore, resolve_app_home, PORTABLE_DIRNAME
+from settings_store import (
+    AppSettings,
+    PORTABLE_DIRNAME,
+    RedcapProjectToken,
+    SettingsStore,
+    fallback_app_home,
+    resolve_app_home,
+)
 from system_profile import GPUInfo, SystemProfile, recommend_inference_mode
 
 
@@ -117,6 +124,19 @@ class SettingsAndRuntimeTests(unittest.TestCase):
                 )
             finally:
                 os.chdir(original_cwd)
+
+    def test_frozen_app_without_portable_marker_uses_current_working_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with patch("settings_store.sys.frozen", True, create=True):
+                with patch("settings_store.frozen_app_roots", return_value=[Path(temp_dir) / "LLMExtractor.app"]):
+                    with patch("settings_store.Path.cwd", return_value=Path(temp_dir)):
+                        self.assertEqual(
+                            resolve_app_home(),
+                            (Path(temp_dir) / PORTABLE_DIRNAME).resolve(),
+                        )
+
+    def test_fallback_app_home_is_user_owned_location(self) -> None:
+        self.assertTrue(str(fallback_app_home()).startswith(str(Path.home())))
 
 
 if __name__ == "__main__":

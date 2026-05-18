@@ -50,6 +50,7 @@ def main() -> int:
     else:
         shutil.copy2(artifact, package_dir / artifact.name)
     (package_dir / ".llm_extractor_portable").write_text("portable\n", encoding="utf-8")
+    copy_release_notes(package_dir, platform_key)
 
     archive_path = dist_dir / f"{package_dir.name}.zip"
     if archive_path.exists():
@@ -136,6 +137,13 @@ def copy_directory_contents(source: Path, destination: Path) -> None:
             shutil.copytree(child, target)
         else:
             shutil.copy2(child, target)
+
+
+def copy_release_notes(package_dir: Path, platform_key: str) -> None:
+    if platform_key.startswith("macos-"):
+        macos_readme = ROOT / "release" / "README_MACOS_TR.txt"
+        if macos_readme.exists():
+            shutil.copy2(macos_readme, package_dir / "ILK_OKU_MACOS.txt")
 
 
 def zip_directory(source_dir: Path, archive_path: Path) -> None:

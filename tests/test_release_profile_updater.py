@@ -4,7 +4,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from release_profile import is_user_profile, show_advanced_ui, show_model_settings
-from settings_store import PORTABLE_DIRNAME, resolve_app_home
+from settings_store import PORTABLE_DIRNAME, PORTABLE_MARKER, resolve_app_home
 from updater import platform_update_payload, version_is_newer
 
 
@@ -52,6 +52,7 @@ class ReleaseProfileUpdaterTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir) / "PortableApp"
             root.mkdir()
+            (root / PORTABLE_MARKER).write_text("portable\n", encoding="utf-8")
             exe = root / "LLMExtractor.exe"
             exe.write_text("", encoding="utf-8")
             with patch("settings_store.sys.executable", str(exe)), patch(

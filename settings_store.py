@@ -185,8 +185,15 @@ def resolve_app_home(app_home: str | Path | None = None) -> Path:
 
 def ensure_app_home(app_home: str | Path | None = None) -> Path:
     resolved = resolve_app_home(app_home)
-    resolved.mkdir(parents=True, exist_ok=True)
-    return resolved
+    try:
+        resolved.mkdir(parents=True, exist_ok=True)
+        return resolved
+    except PermissionError:
+        if app_home is not None or os.getenv(APP_HOME_ENV_VAR):
+            raise
+        fallback = fallback_app_home()
+        fallback.mkdir(parents=True, exist_ok=True)
+        return fallback
 
 
 def find_portable_root() -> Path | None:
@@ -194,9 +201,17 @@ def find_portable_root() -> Path | None:
     for candidate in candidates:
         if (candidate / PORTABLE_MARKER).exists():
             return candidate
-    if is_frozen_app() and candidates:
-        return candidates[0]
     return None
+
+
+def fallback_app_home() -> Path:
+    if sys.platform == "darwin":
+        return (Path.home() / "Library" / "Application Support" / "LLMExtractor").resolve()
+    if os.name == "nt":
+        appdata = os.getenv("APPDATA")
+        if appdata:
+            return (Path(appdata) / "LLMExtractor").resolve()
+    return (Path.home() / ".llm_extractor_data").resolve()
 
 
 def portable_root_candidates() -> list[Path]:

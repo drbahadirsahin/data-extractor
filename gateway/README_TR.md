@@ -31,16 +31,16 @@ Gateway klasöründe:
 
 ```bash
 cd gateway
-cp wrangler.toml.example wrangler.toml
+npx --yes wrangler@latest login
 ```
 
-Gerekirse `wrangler.toml` içindeki `name`, `DEFAULT_MODEL` ve `MAX_TOKENS` değerlerini düzenleyin.
+`wrangler.toml` public repoya girebilir; içinde secret yoktur. Gerekirse `name`, `DEFAULT_MODEL` ve `MAX_TOKENS` değerlerini düzenleyin.
 
 Secret değerlerini dosyaya yazmayın. Bunları Cloudflare secret olarak kaydedin:
 
 ```bash
-wrangler secret put OPENROUTER_API_KEY
-wrangler secret put CLIENT_TOKEN
+npx --yes wrangler@latest secret put OPENROUTER_API_KEY
+npx --yes wrangler@latest secret put CLIENT_TOKEN
 ```
 
 `CLIENT_TOKEN` erken test için basit gateway erişim kontrolüdür. Final mimaride bunun yerine kullanıcı/proje bazlı aktivasyon ve merkezi rate limit mekanizması tercih edilmelidir. Bu token OpenRouter key değildir; sızsa bile OpenRouter secret'ı açığa çıkmaz, ancak gateway kullanımını kötüye kullanmaya izin verebilir.
@@ -48,8 +48,10 @@ wrangler secret put CLIENT_TOKEN
 Deploy:
 
 ```bash
-wrangler deploy
+npx --yes wrangler@latest deploy
 ```
+
+Eğer deploy sırasında `You need to register a workers.dev subdomain` uyarısı alınırsa Cloudflare hesabı için bir defalık `workers.dev` subdomain'i tanımlayın. Cloudflare dokümantasyonuna göre bu ad `<HESAP_SUBDOMAIN>.workers.dev` formatındadır ve Workers & Pages ekranında "Your subdomain" alanından ayarlanır. Bu hesap genelinde kullanılan bir ayardır; örnek olarak `llm-extractor` seçilirse Worker URL'si genellikle `https://llm-extractor-gateway.llm-extractor.workers.dev` olur.
 
 Sağlık kontrolü:
 
@@ -69,6 +71,12 @@ curl https://<gateway-domain>/v1/chat/completions \
     "temperature": 0,
     "max_tokens": 256
   }'
+```
+
+Tek komutla test:
+
+```bash
+./test_gateway.sh https://<gateway-domain> <CLIENT_TOKEN>
 ```
 
 ## Masaüstü ayarı

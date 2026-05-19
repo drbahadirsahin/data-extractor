@@ -18,6 +18,9 @@ llm.api_key
 .env
 .env.*
 *.log
+gateway/.dev.vars
+gateway/.wrangler/
+gateway/client_token.txt
 
 output*.json
 *.tmp

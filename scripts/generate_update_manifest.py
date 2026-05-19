@@ -39,6 +39,7 @@ def main() -> int:
             "url": f"{args.base_url.rstrip('/')}/{archive.name}",
             "sha256": sha256_file(archive),
         }
+    add_generic_platform_aliases(platforms)
 
     if not platforms or version is None:
         raise SystemExit(f"No recognized LLMExtractor release archives found in {dist_dir}")
@@ -61,6 +62,12 @@ def sha256_file(path: Path) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def add_generic_platform_aliases(platforms: dict[str, dict[str, str]]) -> None:
+    windows_platforms = sorted(key for key in platforms if key.startswith("windows-"))
+    if "windows" not in platforms and len(windows_platforms) == 1:
+        platforms["windows"] = dict(platforms[windows_platforms[0]])
 
 
 if __name__ == "__main__":

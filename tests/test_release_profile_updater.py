@@ -4,6 +4,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from release_profile import is_user_profile, show_advanced_ui, show_model_settings
+from scripts.generate_update_manifest import add_generic_platform_aliases
 from settings_store import PORTABLE_DIRNAME, PORTABLE_MARKER, resolve_app_home
 from updater import (
     UpdateError,
@@ -13,6 +14,8 @@ from updater import (
     macos_needs_portable_repair,
     macos_portable_app_bundle,
     normalize_macos_portable_root,
+    packaged_platform_key,
+    platform_keys,
     platform_update_payload,
     remove_macos_quarantine,
     repair_macos_portable_and_relaunch,
@@ -54,6 +57,7 @@ class ReleaseProfileUpdaterTests(unittest.TestCase):
         self.assertTrue(version_is_newer("0.1.1-early.2", "0.1.1-early.1"))
         self.assertTrue(version_is_newer("0.1.1-early.3", "0.1.1-early.2"))
         self.assertTrue(version_is_newer("0.1.1-early.4", "0.1.1-early.3"))
+        self.assertTrue(version_is_newer("0.1.1-early.5", "0.1.1-early.4"))
 
     def test_cache_busted_url_preserves_existing_query(self):
         with patch("updater.time.time", return_value=1234.567):
@@ -73,6 +77,27 @@ class ReleaseProfileUpdaterTests(unittest.TestCase):
             "updater.platform.machine", return_value="arm64"
         ):
             self.assertEqual(platform_update_payload(manifest)["url"], "specific")
+
+    def test_platform_keys_prefer_packaged_windows_x64_on_arm_windows(self):
+        package_root = Path("C:/fld/LLMExtractor-0.1.1-early.5-windows-x64")
+        with patch("updater.current_app_root", return_value=package_root), patch(
+            "updater.platform.system", return_value="Windows"
+        ), patch("updater.platform.machine", return_value="ARM64"):
+            self.assertEqual(platform_keys()[:3], ["windows-x64", "windows-arm64", "windows"])
+            self.assertEqual(packaged_platform_key(), "windows-x64")
+
+    def test_platform_payload_falls_back_to_windows_x64_on_arm_windows(self):
+        manifest = {"platforms": {"windows-x64": {"url": "x64"}}}
+        with patch("updater.current_app_root", return_value=Path("C:/plain")), patch(
+            "updater.platform.system", return_value="Windows"
+        ), patch("updater.platform.machine", return_value="ARM64"):
+            self.assertEqual(platform_update_payload(manifest)["url"], "x64")
+
+    def test_manifest_adds_generic_windows_alias_for_single_windows_package(self):
+        platforms = {"windows-x64": {"url": "x64", "sha256": "abc"}}
+        add_generic_platform_aliases(platforms)
+
+        self.assertEqual(platforms["windows"]["url"], "x64")
 
     def test_macos_app_translocation_detection(self):
         translocated = Path(

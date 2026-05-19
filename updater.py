@@ -25,6 +25,11 @@ class UpdateError(RuntimeError):
     pass
 
 
+PACKAGE_PLATFORM_PATTERN = re.compile(
+    r"LLMExtractor-.+-(?P<platform>(?:macos|windows|linux)-[A-Za-z0-9_]+)$"
+)
+
+
 def check_for_update(app_config: dict[str, Any]) -> dict[str, Any] | None:
     settings = update_settings(app_config)
     manifest_url = str(settings.get("manifest_url") or "").strip()
@@ -90,16 +95,42 @@ def platform_update_payload(manifest: dict[str, Any]) -> dict[str, Any] | None:
 
 
 def platform_keys() -> list[str]:
+    keys: list[str] = []
+
+    def add_key(key: str) -> None:
+        if key and key not in keys:
+            keys.append(key)
+
+    add_key(packaged_platform_key())
     system = platform.system().lower()
     machine = platform.machine().lower()
     arch = "arm64" if machine in {"arm64", "aarch64"} else "x64"
     if system == "darwin":
-        return [f"macos-{arch}", "macos"]
-    if system == "windows":
-        return [f"windows-{arch}", "windows"]
-    if system == "linux":
-        return [f"linux-{arch}", "linux"]
-    return [f"{system}-{arch}", system]
+        add_key(f"macos-{arch}")
+        add_key("macos")
+    elif system == "windows":
+        add_key(f"windows-{arch}")
+        if arch == "arm64":
+            add_key("windows-x64")
+        add_key("windows")
+    elif system == "linux":
+        add_key(f"linux-{arch}")
+        add_key("linux")
+    else:
+        add_key(f"{system}-{arch}")
+        add_key(system)
+    return keys
+
+
+def packaged_platform_key() -> str | None:
+    try:
+        root = current_app_root()
+    except Exception:
+        return None
+    match = PACKAGE_PLATFORM_PATTERN.match(root.name)
+    if match:
+        return match.group("platform")
+    return None
 
 
 def version_is_newer(candidate: str, current: str) -> bool:

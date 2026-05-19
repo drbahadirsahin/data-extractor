@@ -9,6 +9,7 @@ from llm_provider import (
     OllamaProvider,
     OpenAICompatibleProvider,
     ProviderHTTPError,
+    build_auth_headers,
     build_ollama_options,
     build_openai_reasoning,
     create_provider,
@@ -50,6 +51,19 @@ class LlmProviderTests(unittest.TestCase):
     def test_create_provider_supports_openrouter_alias(self) -> None:
         provider = create_provider({"provider": "openrouter"})
         self.assertIsInstance(provider, OpenAICompatibleProvider)
+
+    def test_create_provider_supports_managed_gateway(self) -> None:
+        provider = create_provider({"provider": "llm_gateway"})
+        self.assertIsInstance(provider, OpenAICompatibleProvider)
+
+    def test_gateway_provider_does_not_require_api_key(self) -> None:
+        self.assertEqual(build_auth_headers({"provider": "llm_gateway"}), {})
+
+    def test_gateway_provider_uses_optional_client_token(self) -> None:
+        self.assertEqual(
+            build_auth_headers({"provider": "llm_gateway", "gateway_client_token": "client-token"}),
+            {"Authorization": "Bearer client-token"},
+        )
 
     def test_build_ollama_options_merges_extra_options(self) -> None:
         options = build_ollama_options(
@@ -125,6 +139,32 @@ class LlmProviderTests(unittest.TestCase):
         second_payload = mock_post.call_args_list[1].kwargs["payload"]
         self.assertIn("response_format", first_payload)
         self.assertNotIn("response_format", second_payload)
+
+    def test_gateway_provider_posts_without_openrouter_key(self) -> None:
+        provider = OpenAICompatibleProvider()
+        success_response = {
+            "choices": [
+                {
+                    "message": {
+                        "content": '{"project_name":"Test","results":[]}',
+                    }
+                }
+            ]
+        }
+        with patch("llm_provider.post_json", return_value=success_response) as mock_post:
+            response = provider.generate(
+                messages=[{"role": "user", "content": "test"}],
+                schema={"type": "object"},
+                settings={
+                    "provider": "llm_gateway",
+                    "base_url": "https://llm-gateway.example.com/v1",
+                    "model": "qwen/qwen3.5-9b",
+                    "use_json_schema": True,
+                },
+            )
+
+        self.assertEqual(response.content, '{"project_name":"Test","results":[]}')
+        self.assertNotIn("Authorization", mock_post.call_args.kwargs["headers"])
 
     def test_post_json_surfaces_cloudflare_1010_helpfully(self) -> None:
         http_error = HTTPError(

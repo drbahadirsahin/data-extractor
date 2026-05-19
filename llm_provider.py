@@ -17,7 +17,9 @@ DEFAULT_HTTP_HEADERS = {
     ),
 }
 API_KEY_PROVIDER_NAMES = {"openai", "openai_compatible", "openrouter"}
+GATEWAY_PROVIDER_NAMES = {"llm_gateway", "managed_gateway"}
 DEFAULT_API_KEY_SECRET_NAME = "llm_api_key"
+DEFAULT_GATEWAY_CLIENT_TOKEN_SECRET_NAME = "llm_gateway_client_token"
 
 
 @dataclass
@@ -92,12 +94,12 @@ class OpenAICompatibleProvider(LLMProvider):
         settings: dict[str, Any],
     ) -> LLMResponse:
         base_url = normalize_base_url(settings["base_url"])
-        api_key = resolve_api_key(settings)
         headers = {
-            "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
             **coerce_string_dict(settings.get("headers", {})),
         }
+        auth_headers = build_auth_headers(settings)
+        headers.update(auth_headers)
         timeout_seconds = int(settings.get("timeout_seconds", 120))
         payload = {
             "model": settings["model"],
@@ -157,7 +159,7 @@ def create_provider(settings: dict[str, Any]) -> LLMProvider:
     provider_name = str(settings.get("provider", "ollama")).strip().lower()
     if provider_name == "ollama":
         return OllamaProvider()
-    if provider_name in API_KEY_PROVIDER_NAMES:
+    if provider_name in API_KEY_PROVIDER_NAMES or provider_name in GATEWAY_PROVIDER_NAMES:
         return OpenAICompatibleProvider()
     raise ValueError(f"Unsupported LLM provider: {provider_name}")
 
@@ -189,7 +191,39 @@ def resolve_api_key(settings: dict[str, Any]) -> str:
     )
 
 
+def build_auth_headers(settings: dict[str, Any]) -> dict[str, str]:
+    provider_name = str(settings.get("provider", "")).strip().lower()
+    if provider_name in GATEWAY_PROVIDER_NAMES or str(settings.get("auth", "")).strip().lower() == "none":
+        gateway_token = resolve_gateway_client_token(settings)
+        if gateway_token:
+            return {"Authorization": f"Bearer {gateway_token}"}
+        return {}
+    return {"Authorization": f"Bearer {resolve_api_key(settings)}"}
+
+
+def resolve_gateway_client_token(settings: dict[str, Any]) -> str | None:
+    direct_value = settings.get("gateway_client_token")
+    if direct_value:
+        return str(direct_value)
+    env_var = settings.get("gateway_client_token_env")
+    if env_var:
+        env_value = os.getenv(str(env_var))
+        if env_value:
+            return env_value
+    secret_name = str(
+        settings.get("gateway_client_token_secret_name") or DEFAULT_GATEWAY_CLIENT_TOKEN_SECRET_NAME
+    ).strip()
+    if secret_name:
+        secret_value = resolve_api_key_from_secret_store(secret_name)
+        if secret_value:
+            return secret_value
+    return None
+
+
 def can_resolve_api_key(settings: dict[str, Any]) -> bool:
+    provider_name = str(settings.get("provider", "")).strip().lower()
+    if provider_name in GATEWAY_PROVIDER_NAMES or str(settings.get("auth", "")).strip().lower() == "none":
+        return True
     try:
         resolve_api_key(settings)
     except ValueError:

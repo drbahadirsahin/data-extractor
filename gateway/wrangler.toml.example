@@ -1,0 +1,13 @@
+name = "llm-extractor-gateway"
+main = "cloudflare-worker.js"
+compatibility_date = "2026-05-19"
+
+[vars]
+DEFAULT_MODEL = "qwen/qwen3.5-9b"
+MAX_TOKENS = "8192"
+OPENROUTER_HTTP_REFERER = "https://github.com/drbahadirsahin/data-extractor"
+OPENROUTER_APP_TITLE = "LLM Extractor"
+
+# Do not put secrets in this file. Set them with:
+# wrangler secret put OPENROUTER_API_KEY
+# wrangler secret put CLIENT_TOKEN

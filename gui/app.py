@@ -88,22 +88,19 @@ def activate_window(window) -> None:
         from PySide6.QtCore import Qt
         from PySide6.QtWidgets import QApplication
 
-        screen = QApplication.primaryScreen()
+        screen = window_screen(target, QApplication)
+        target.setWindowState(
+            target.windowState()
+            & ~Qt.WindowState.WindowMinimized
+            & ~Qt.WindowState.WindowMaximized
+            & ~Qt.WindowState.WindowFullScreen
+        )
         target.showNormal()
         if screen is not None:
             available = screen.availableGeometry()
             constrain_window_to_screen(target, available)
-            frame = target.frameGeometry()
-            frame.moveCenter(available.center())
-            if frame.left() < available.left():
-                frame.moveLeft(available.left())
-            if frame.top() < available.top():
-                frame.moveTop(available.top())
-            if frame.right() > available.right():
-                frame.moveRight(available.right())
-            if frame.bottom() > available.bottom():
-                frame.moveBottom(available.bottom())
-            target.move(frame.topLeft())
+            QApplication.processEvents()
+            place_window_within_screen(target, available)
         target.setWindowState(
             (target.windowState() & ~Qt.WindowState.WindowMinimized)
             | Qt.WindowState.WindowActive
@@ -111,34 +108,75 @@ def activate_window(window) -> None:
         target.raise_()
         target.activateWindow()
         geometry = target.geometry()
+        frame = target.frameGeometry()
         logging.info(
-            "Window activation requested: visible=%s active=%s geometry=%s,%s %sx%s",
+            "Window activation requested: visible=%s active=%s geometry=%s,%s %sx%s frame=%s,%s %sx%s",
             target.isVisible(),
             target.isActiveWindow(),
             geometry.x(),
             geometry.y(),
             geometry.width(),
             geometry.height(),
+            frame.x(),
+            frame.y(),
+            frame.width(),
+            frame.height(),
         )
     except RuntimeError:
         logging.exception("Could not activate main window")
 
 
+def window_screen(target, q_application):
+    handle = target.windowHandle()
+    if handle is not None and handle.screen() is not None:
+        return handle.screen()
+    frame = target.frameGeometry()
+    screen = q_application.screenAt(frame.center())
+    return screen or q_application.primaryScreen()
+
+
 def constrain_window_to_screen(target, available_geometry) -> None:
     margin = 32
-    max_width = max(640, available_geometry.width() - margin)
-    max_height = max(520, available_geometry.height() - margin)
+    frame = target.frameGeometry()
+    geometry = target.geometry()
+    frame_extra_width = max(0, frame.width() - geometry.width())
+    frame_extra_height = max(0, frame.height() - geometry.height())
+    max_width = max(420, available_geometry.width() - margin - frame_extra_width)
+    max_height = max(360, available_geometry.height() - margin - frame_extra_height)
     width = min(target.width(), max_width)
     height = min(target.height(), max_height)
     if width != target.width() or height != target.height():
         target.resize(width, height)
         logging.info(
-            "Window resized to fit screen: %sx%s available=%sx%s",
+            "Window resized to fit screen: %sx%s available=%sx%s frame_extra=%sx%s",
             width,
             height,
             available_geometry.width(),
             available_geometry.height(),
+            frame_extra_width,
+            frame_extra_height,
         )
+
+
+def place_window_within_screen(target, available_geometry) -> None:
+    from PySide6.QtCore import QPoint
+
+    edge_margin = 8
+    frame = target.frameGeometry()
+    frame.moveCenter(available_geometry.center())
+
+    if frame.width() <= available_geometry.width():
+        left = max(available_geometry.left(), min(frame.left(), available_geometry.right() - frame.width() + 1))
+    else:
+        left = available_geometry.left() + edge_margin
+    if frame.height() <= available_geometry.height():
+        top = max(available_geometry.top(), min(frame.top(), available_geometry.bottom() - frame.height() + 1))
+    else:
+        top = available_geometry.top() + edge_margin
+
+    geometry = target.geometry()
+    offset = geometry.topLeft() - target.frameGeometry().topLeft()
+    target.move(QPoint(left, top) + offset)
 
 
 def run_deferred_update_check(app, runtime) -> None:

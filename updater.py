@@ -352,12 +352,30 @@ def build_posix_apply_update_script(*, archive_path: Path, app_root: Path, execu
         rm -rf "$BACKUP_ROOT"
 
         APP_BUNDLE="$(find "$APP_ROOT" -maxdepth 1 -name '*.app' -type d | head -n 1)"
+        NEW_EXECUTABLE=""
+        if [ -n "$APP_BUNDLE" ] && [ -d "$APP_BUNDLE/Contents/MacOS" ]; then
+          NEW_EXECUTABLE="$APP_BUNDLE/Contents/MacOS/LLMExtractor"
+          if [ ! -x "$NEW_EXECUTABLE" ]; then
+            NEW_EXECUTABLE="$(find "$APP_BUNDLE/Contents/MacOS" -maxdepth 1 -type f -perm -111 | head -n 1 || true)"
+          fi
+        fi
         if [ -n "$APP_BUNDLE" ] && command -v open >/dev/null 2>&1; then
           echo "Opening $APP_BUNDLE"
-          open "$APP_BUNDLE"
+          if open -n "$APP_BUNDLE"; then
+            echo "Relaunch requested with open"
+            echo "Update apply finished at $(date)"
+            exit 0
+          else
+            OPEN_STATUS=$?
+            echo "open failed with status $OPEN_STATUS; trying executable fallback"
+          fi
+        fi
+        if [ -n "$NEW_EXECUTABLE" ] && [ -x "$NEW_EXECUTABLE" ]; then
+          echo "Opening executable fallback $NEW_EXECUTABLE"
+          nohup "$NEW_EXECUTABLE" >/dev/null 2>&1 &
         elif [ -x "$EXECUTABLE" ]; then
-          echo "Opening executable fallback"
-          "$EXECUTABLE" >/dev/null 2>&1 &
+          echo "Opening original executable fallback"
+          nohup "$EXECUTABLE" >/dev/null 2>&1 &
         fi
         echo "Update apply finished at $(date)"
         """

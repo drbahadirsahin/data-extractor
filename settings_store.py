@@ -94,8 +94,8 @@ class RedcapSettings:
 class UISettings:
     language: str = "tr"
     last_open_directory: str | None = None
-    window_width: int = 1440
-    window_height: int = 960
+    window_width: int = 1180
+    window_height: int = 760
 
     @classmethod
     def from_dict(cls, payload: dict[str, Any] | None) -> "UISettings":
@@ -103,8 +103,8 @@ class UISettings:
         return cls(
             language=str(payload.get("language", "tr")),
             last_open_directory=coerce_optional_str(payload.get("last_open_directory")),
-            window_width=int(payload.get("window_width", 1440)),
-            window_height=int(payload.get("window_height", 960)),
+            window_width=int(payload.get("window_width", 1180)),
+            window_height=int(payload.get("window_height", 760)),
         )
 
 

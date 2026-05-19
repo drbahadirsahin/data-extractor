@@ -23,6 +23,7 @@ from updater import (
     repair_macos_portable_and_relaunch,
     validate_self_update_target,
     version_is_newer,
+    windows_update_launcher_command,
 )
 
 
@@ -66,6 +67,8 @@ class ReleaseProfileUpdaterTests(unittest.TestCase):
         self.assertTrue(version_is_newer("0.1.1-early.12", "0.1.1-early.11"))
         self.assertTrue(version_is_newer("0.1.1-early.13", "0.1.1-early.12"))
         self.assertTrue(version_is_newer("0.1.1-early.14", "0.1.1-early.13"))
+        self.assertTrue(version_is_newer("0.1.1-early.15", "0.1.1-early.14"))
+        self.assertTrue(version_is_newer("0.1.1-early.16", "0.1.1-early.15"))
 
     def test_cache_busted_url_preserves_existing_query(self):
         with patch("updater.time.time", return_value=1234.567):
@@ -258,6 +261,14 @@ class ReleaseProfileUpdaterTests(unittest.TestCase):
         self.assertIn("WindowsPowerShell\\v1.0\\powershell.exe", script)
         self.assertIn("-ExecutionPolicy Bypass -File", script)
         self.assertIn("PowerShell exited with", script)
+
+    def test_windows_update_launcher_command_runs_cmd_file_directly(self):
+        launcher = Path("C:/Users/Test User/AppData/Local/Temp/llm/apply_update.cmd")
+
+        command = windows_update_launcher_command(launcher)
+
+        self.assertEqual(command, ["cmd.exe", "/d", "/c", str(launcher)])
+        self.assertNotIn("start", [part.lower() for part in command])
 
     def test_frozen_app_home_defaults_next_to_executable(self):
         with tempfile.TemporaryDirectory() as temp_dir:

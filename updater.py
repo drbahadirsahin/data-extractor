@@ -254,10 +254,11 @@ def stage_update_and_restart(archive_path: Path) -> None:
         creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(
             subprocess, "DETACHED_PROCESS", 0
         )
-        launcher_command = f'start "" /min cmd.exe /d /c "{launcher_path}"'
+        launcher_command = windows_update_launcher_command(launcher_path)
+        append_update_log(stage_log, f"Launcher command={launcher_command!r}")
         try:
             process = subprocess.Popen(
-                ["cmd.exe", "/d", "/c", launcher_command],
+                launcher_command,
                 close_fds=True,
                 cwd=tempfile.gettempdir(),
                 creationflags=creationflags,
@@ -303,6 +304,10 @@ def write_windows_stage_log(
     append_update_log(log_path, f"PS_SCRIPT={script_path}")
     append_update_log(log_path, f"CMD_LAUNCHER={launcher_path}")
     return log_path
+
+
+def windows_update_launcher_command(launcher_path: Path) -> list[str]:
+    return ["cmd.exe", "/d", "/c", str(launcher_path)]
 
 
 def append_update_log(log_path: Path, message: str) -> None:

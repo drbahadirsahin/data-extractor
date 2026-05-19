@@ -5,6 +5,7 @@ compatibility_date = "2026-05-19"
 [vars]
 DEFAULT_MODEL = "qwen/qwen3.5-9b"
 MAX_TOKENS = "8192"
+DEFAULT_REASONING_EFFORT = "none"
 OPENROUTER_HTTP_REFERER = "https://github.com/drbahadirsahin/data-extractor"
 OPENROUTER_APP_TITLE = "LLM Extractor"
 

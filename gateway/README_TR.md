@@ -34,7 +34,7 @@ cd gateway
 npx --yes wrangler@latest login
 ```
 
-`wrangler.toml` public repoya girebilir; içinde secret yoktur. Gerekirse `name`, `DEFAULT_MODEL` ve `MAX_TOKENS` değerlerini düzenleyin.
+`wrangler.toml` public repoya girebilir; içinde secret yoktur. Gerekirse `name`, `DEFAULT_MODEL`, `MAX_TOKENS` ve `DEFAULT_REASONING_EFFORT` değerlerini düzenleyin. Qwen modellerinde gereksiz düşünme çıktısını ve maliyeti azaltmak için varsayılan reasoning ayarı `none` olarak tutulur.
 
 Secret değerlerini dosyaya yazmayın. Bunları Cloudflare secret olarak kaydedin:
 
@@ -68,6 +68,7 @@ curl https://<gateway-domain>/v1/chat/completions \
   -d '{
     "model": "qwen/qwen3.5-9b",
     "messages": [{"role": "user", "content": "Sadece JSON döndür: {\"ok\": true}"}],
+    "reasoning": {"effort": "none", "exclude": true},
     "temperature": 0,
     "max_tokens": 256
   }'

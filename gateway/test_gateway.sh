@@ -29,6 +29,10 @@ curl -fsS "${GATEWAY_URL}/v1/chat/completions" \
         "content": "Sadece su JSON nesnesini dondur: {\"ok\": true}"
       }
     ],
+    "reasoning": {
+      "effort": "none",
+      "exclude": true
+    },
     "temperature": 0,
     "max_tokens": 64
   }'

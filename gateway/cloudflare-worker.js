@@ -1,6 +1,7 @@
 const OPENROUTER_CHAT_COMPLETIONS_URL = "https://openrouter.ai/api/v1/chat/completions";
 const DEFAULT_MODEL = "qwen/qwen3.5-9b";
 const DEFAULT_MAX_TOKENS = 8192;
+const DEFAULT_REASONING_EFFORT = "none";
 
 export default {
   async fetch(request, env) {
@@ -88,6 +89,14 @@ function applyGatewayPolicy(payload, env) {
 
   const maxTokens = parsePositiveInteger(env.MAX_TOKENS, DEFAULT_MAX_TOKENS);
   payload.max_tokens = Math.min(parsePositiveInteger(payload.max_tokens, maxTokens), maxTokens);
+
+  const reasoningEffort = String(env.DEFAULT_REASONING_EFFORT || DEFAULT_REASONING_EFFORT).trim();
+  if (reasoningEffort) {
+    payload.reasoning = {
+      effort: reasoningEffort,
+      exclude: true,
+    };
+  }
 
   if (typeof payload.temperature === "number") {
     payload.temperature = Math.max(0, Math.min(payload.temperature, 1));

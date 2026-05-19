@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable
 
+from llm_settings import managed_llm_settings_from_config
 from runtime_context import RuntimeContext
 from gui.i18n import tr
 from release_profile import app_version, show_advanced_ui
@@ -18,6 +19,9 @@ class ClinicalPage:
 
 
 def build_default_llm_settings(runtime: RuntimeContext) -> dict[str, Any]:
+    managed_settings = managed_llm_settings_from_config(getattr(runtime, "app_config", None))
+    if managed_settings is not None:
+        return managed_settings
     inference = runtime.settings.inference
     provider = inference.selected_provider or runtime.inference_recommendation.mode
     if provider == "openai_compatible":

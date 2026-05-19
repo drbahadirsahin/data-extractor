@@ -19,6 +19,7 @@ from excel_import import (
 )
 from gui.i18n import tr
 from gui.view_models import provider_label_for_key
+from llm_settings import managed_llm_settings_from_config
 from llm_provider import API_KEY_PROVIDER_NAMES, can_resolve_api_key, merge_llm_settings
 from project_config import ProjectConfig
 from release_profile import show_model_settings
@@ -2679,6 +2680,9 @@ class WorkspacePage:
         return any(str(item.get(source_field_name, "")).strip() == field_name for item in self.bundle.config.append_fields)
 
     def build_project_llm_defaults(self) -> dict[str, Any]:
+        managed_settings = managed_llm_settings_from_config(self.runtime.app_config)
+        if managed_settings is not None:
+            return managed_settings
         inference = self.runtime.settings.inference
         provider = inference.selected_provider or self.runtime.inference_recommendation.mode
         if provider == "openai_compatible":

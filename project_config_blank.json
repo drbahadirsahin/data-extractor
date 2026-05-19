@@ -5,13 +5,13 @@
   "target_forms": [],
   "target_fields": [],
   "llm": {
-    "provider": "openai_compatible",
-    "base_url": "https://openrouter.ai/api/v1",
+    "provider": "llm_gateway",
+    "base_url": "https://llm-extractor-gateway.drbahadirsahin.workers.dev/v1",
     "model": "qwen/qwen3.5-9b",
     "temperature": 0,
     "max_tokens": 8192,
     "timeout_seconds": 120,
-    "api_key_secret_name": "llm_api_key",
+    "gateway_client_token_secret_name": "llm_gateway_client_token",
     "use_json_schema": true
   },
   "dictionary_legend": {

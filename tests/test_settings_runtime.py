@@ -110,7 +110,11 @@ class SettingsAndRuntimeTests(unittest.TestCase):
                 context = bootstrap_runtime(temp_dir)
 
             self.assertEqual(context.inference_recommendation.mode, "openai_compatible")
-            self.assertEqual(context.settings.inference.selected_provider, "openai_compatible")
+            self.assertEqual(context.settings.inference.selected_provider, "llm_gateway")
+            self.assertEqual(
+                context.settings.inference.openai_compatible_base_url,
+                "https://llm-extractor-gateway.drbahadirsahin.workers.dev/v1",
+            )
             self.assertTrue((Path(temp_dir) / "settings.json").exists())
 
     def test_resolve_app_home_defaults_to_workspace_local_directory(self) -> None:

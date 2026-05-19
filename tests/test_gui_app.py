@@ -26,6 +26,7 @@ class GuiAppTests(unittest.TestCase):
 
     def test_build_default_llm_settings_keeps_api_secret_indirect(self):
         runtime = SimpleNamespace(
+            app_config={},
             settings=SimpleNamespace(
                 inference=SimpleNamespace(
                     selected_provider="openai_compatible",
@@ -44,6 +45,31 @@ class GuiAppTests(unittest.TestCase):
 
         self.assertEqual(settings["provider"], "openai_compatible")
         self.assertEqual(settings["api_key_secret_name"], "llm_api_key")
+        self.assertNotIn("api_key", settings)
+
+    def test_build_default_llm_settings_uses_managed_gateway_without_direct_secret(self):
+        runtime = SimpleNamespace(
+            app_config={
+                "llm": {
+                    "provider": "llm_gateway",
+                    "base_url": "https://gateway.example/v1",
+                    "model": "qwen/qwen3.5-9b",
+                    "gateway_client_token_secret_name": "llm_gateway_client_token",
+                    "gateway_client_token": "do-not-copy",
+                    "api_key": "do-not-copy",
+                    "use_json_schema": True,
+                }
+            },
+            settings=SimpleNamespace(inference=SimpleNamespace()),
+            inference_recommendation=SimpleNamespace(mode="openai_compatible"),
+        )
+
+        settings = build_default_llm_settings(runtime)
+
+        self.assertEqual(settings["provider"], "llm_gateway")
+        self.assertEqual(settings["base_url"], "https://gateway.example/v1")
+        self.assertEqual(settings["gateway_client_token_secret_name"], "llm_gateway_client_token")
+        self.assertNotIn("gateway_client_token", settings)
         self.assertNotIn("api_key", settings)
 
     def test_clinical_import_page_gates_document_steps(self):

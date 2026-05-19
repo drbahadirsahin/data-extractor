@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from helpers import load_json
+from llm_settings import managed_llm_settings_from_config, normalize_provider_name
 from release_profile import is_user_profile
 from secrets_store import SecretsStore
 from settings_store import AppSettings, SettingsStore
@@ -72,15 +73,14 @@ def load_app_config() -> dict[str, Any]:
 def apply_managed_release_defaults(settings: AppSettings, app_config: dict[str, Any]) -> bool:
     if not is_user_profile(app_config):
         return False
-    llm = app_config.get("llm", {})
-    if not isinstance(llm, dict):
-        llm = {}
+    llm = managed_llm_settings_from_config(app_config) or {}
+    provider = normalize_provider_name(llm.get("provider")) or "openai_compatible"
     changed = False
     if settings.inference.mode != "managed":
         settings.inference.mode = "managed"
         changed = True
-    if settings.inference.selected_provider != "openai_compatible":
-        settings.inference.selected_provider = "openai_compatible"
+    if settings.inference.selected_provider != provider:
+        settings.inference.selected_provider = provider
         changed = True
     base_url = coerce_optional_str(llm.get("base_url"))
     if base_url and settings.inference.openai_compatible_base_url != base_url:

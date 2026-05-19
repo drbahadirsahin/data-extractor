@@ -1,6 +1,6 @@
 {
   "release": {
-    "version": "0.1.1-early.11",
+    "version": "0.1.1-early.12",
     "profile": "user",
     "channel": "early",
     "updates": {
@@ -35,7 +35,7 @@
     "use_json_schema": true
   },
   "redcap": {
-    "api_url": "",
+    "api_url": "https://marmarauroloji.com/redcap/api/",
     "allow_api_url_edit": false
   },
   "identity_registry": {

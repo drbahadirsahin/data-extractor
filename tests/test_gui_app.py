@@ -6,7 +6,10 @@ from unittest.mock import patch
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from gui.app import resolve_ui_mode
-from gui.clinical_main_window import ClinicalImportPage, build_default_llm_settings
+from gui.clinical_main_window import ClinicalImportPage, ClinicalRedcapPage, build_default_llm_settings
+from redcap_client import RedcapProject
+from secrets_store import SecretsStore
+from settings_store import AppSettings, SettingsStore
 
 
 def get_qapplication():
@@ -149,6 +152,57 @@ class GuiAppTests(unittest.TestCase):
         state["import_ok"] = True
         page.next_excel_step()
         self.assertEqual(page.excel_step, 1)
+
+    def test_clinical_redcap_validate_persists_project_and_locks_configured_url(self):
+        get_qapplication()
+        with patch("gui.clinical_main_window.ensure_project_config", return_value="/tmp/project_config.json"):
+            import tempfile
+
+            with tempfile.TemporaryDirectory() as temp_dir:
+                settings_store = SettingsStore(temp_dir)
+                settings = AppSettings()
+                settings.redcap.api_url = "https://marmarauroloji.com/redcap/api/"
+                runtime = SimpleNamespace(
+                    app_home=temp_dir,
+                    app_config={
+                        "redcap": {
+                            "api_url": "https://marmarauroloji.com/redcap/api/",
+                            "allow_api_url_edit": False,
+                        },
+                        "llm": {
+                            "provider": "llm_gateway",
+                            "base_url": "https://gateway.example/v1",
+                            "model": "qwen/qwen3.5-9b",
+                        },
+                    },
+                    settings=settings,
+                    settings_store=settings_store,
+                    secrets_store=SecretsStore(temp_dir),
+                    inference_recommendation=SimpleNamespace(mode="openai_compatible"),
+                )
+                saved = {"called": False}
+                page = ClinicalRedcapPage(runtime=runtime, on_saved=lambda: saved.__setitem__("called", True))
+
+                class FakeClient:
+                    def __init__(self, api_url, api_token):
+                        self.api_url = api_url
+                        self.api_token = api_token
+
+                    def get_project(self):
+                        return RedcapProject(project_id="42", project_title="Demo Project")
+
+                page.RedcapClient = FakeClient
+                page.token_input.setText("secret-token")
+                page.validate_token()
+
+                loaded = settings_store.load()
+                self.assertTrue(page.api_url_input.isReadOnly())
+                self.assertTrue(saved["called"])
+                self.assertEqual(loaded.redcap.selected_project_id, "42")
+                self.assertEqual(loaded.redcap.selected_project_name, "Demo Project")
+                self.assertEqual(len(loaded.redcap.saved_project_tokens), 1)
+                self.assertEqual(page.saved_projects.findData("42") >= 0, True)
+                self.assertEqual(runtime.secrets_store.get("redcap_api_token_42"), "secret-token")
 
 
 if __name__ == "__main__":

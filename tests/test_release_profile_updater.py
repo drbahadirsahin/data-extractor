@@ -62,6 +62,7 @@ class ReleaseProfileUpdaterTests(unittest.TestCase):
         self.assertTrue(version_is_newer("0.1.1-early.6", "0.1.1-early.5"))
         self.assertTrue(version_is_newer("0.1.1-early.10", "0.1.1-early.9"))
         self.assertTrue(version_is_newer("0.1.1-early.11", "0.1.1-early.10"))
+        self.assertTrue(version_is_newer("0.1.1-early.12", "0.1.1-early.11"))
 
     def test_cache_busted_url_preserves_existing_query(self):
         with patch("updater.time.time", return_value=1234.567):
@@ -228,7 +229,7 @@ class ReleaseProfileUpdaterTests(unittest.TestCase):
         self.assertIn('open -n "$APP_BUNDLE"', script)
         self.assertIn("nohup \"$NEW_EXECUTABLE\"", script)
 
-    def test_windows_apply_update_installs_to_sibling_version_folder(self):
+    def test_windows_apply_update_replaces_app_root_after_parent_exits(self):
         script = build_windows_apply_update_script(
             archive_path=Path("C:/Temp/update.zip"),
             app_root=Path("C:/fld/LLMExtractor-0.1.1-early.5-windows-x64"),
@@ -236,11 +237,13 @@ class ReleaseProfileUpdaterTests(unittest.TestCase):
             parent_pid=123,
         )
 
-        self.assertIn("$InstallRoot = Join-Path $ParentRoot", script)
-        self.assertIn("Move-Item -LiteralPath $SourceRoot -Destination $InstallRoot", script)
-        self.assertIn("Copy-Item -LiteralPath $OldDataDir -Destination $NewDataDir", script)
-        self.assertIn("Start-Process -FilePath $NewExecutable", script)
-        self.assertNotIn("Rename-Item -LiteralPath $AppRoot", script)
+        self.assertIn("$PersistentLog = Join-Path $OldDataDir \"apply_update.log\"", script)
+        self.assertIn("Move current app root to backup", script)
+        self.assertIn("Move-Item -LiteralPath $AppRoot -Destination $BackupRoot", script)
+        self.assertIn("Move-Item -LiteralPath $SourceRoot -Destination $AppRoot", script)
+        self.assertIn("Copy-Item -LiteralPath $PreservedDataDir -Destination $NewDataDir", script)
+        self.assertIn("Start-Process -FilePath $NewExecutable -WorkingDirectory $AppRoot", script)
+        self.assertIn("Restored backup after failed update", script)
 
     def test_frozen_app_home_defaults_next_to_executable(self):
         with tempfile.TemporaryDirectory() as temp_dir:

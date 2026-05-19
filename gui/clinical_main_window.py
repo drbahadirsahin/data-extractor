@@ -606,6 +606,7 @@ class ClinicalRedcapPage:
         self.project_value.setWordWrap(True)
         self.saved_projects = QComboBox()
         self.populate_saved_projects()
+        self.update_selected_project_display()
         self.saved_projects.currentIndexChanged.connect(self.select_saved_project)
 
         form.addRow(tr("redcap_api_url", self.language), self.api_url_input)
@@ -656,6 +657,7 @@ class ClinicalRedcapPage:
         self.validated_project = project
         self.project_value.setText(f"{project.project_title} ({project.project_id})")
         self.status.setText(tr("redcap_project_validated", self.language, project=project.project_title))
+        self.save_connection()
 
     def save_connection(self) -> None:
         from PySide6.QtWidgets import QMessageBox
@@ -683,6 +685,11 @@ class ClinicalRedcapPage:
             ),
         )
         settings.first_run_completed = True
+        self.runtime.settings_store.save(settings)
+        self.populate_saved_projects()
+        self.update_selected_project_display()
+        self.status.setText(tr("redcap_project_saved", self.language, project=project.project_title))
+        self.on_saved()
         try:
             config_path = ensure_project_config(
                 app_home=self.runtime.app_home,
@@ -702,9 +709,7 @@ class ClinicalRedcapPage:
         settings.preferred_project_config_path = str(config_path)
         self.runtime.settings_store.save(settings)
         self.token_input.clear()
-        self.populate_saved_projects()
         self.status.setText(tr("redcap_project_saved", self.language, project=project.project_title))
-        self.on_saved()
 
     def populate_saved_projects(self) -> None:
         self.saved_projects.blockSignals(True)
@@ -718,6 +723,18 @@ class ClinicalRedcapPage:
             if index >= 0:
                 self.saved_projects.setCurrentIndex(index)
         self.saved_projects.blockSignals(False)
+        self.update_selected_project_display()
+
+    def update_selected_project_display(self) -> None:
+        project_id = self.runtime.settings.redcap.selected_project_id
+        if not project_id:
+            return
+        for project in self.runtime.settings.redcap.saved_project_tokens:
+            if project.project_id != str(project_id):
+                continue
+            self.api_url_input.setText(project.api_url)
+            self.project_value.setText(f"{project.project_name} ({project.project_id})")
+            return
 
     def select_saved_project(self) -> None:
         project_id = self.saved_projects.currentData()

@@ -4,6 +4,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 import json
 from pathlib import Path
+import sys
 from typing import Any
 
 import pandas as pd
@@ -202,7 +203,10 @@ def default_redcap_api_dictionary_legend() -> dict[str, str]:
 
 
 def default_search_roots(app_home: str | Path) -> list[Path]:
-    roots = [Path.cwd().resolve(), Path(app_home).expanduser().resolve() / "projects"]
+    roots = [Path(app_home).expanduser().resolve() / "projects"]
+    cwd = Path.cwd().resolve()
+    if should_search_current_working_directory(cwd):
+        roots.append(cwd)
     deduped: list[Path] = []
     seen: set[Path] = set()
     for root in roots:
@@ -211,6 +215,24 @@ def default_search_roots(app_home: str | Path) -> list[Path]:
         seen.add(root)
         deduped.append(root)
     return deduped
+
+
+def should_search_current_working_directory(cwd: Path) -> bool:
+    if is_packaged_app():
+        return False
+    try:
+        home = Path.home().resolve()
+    except Exception:
+        home = None
+    if home is not None and cwd == home:
+        return False
+    if cwd == cwd.parent:
+        return False
+    return any((cwd / marker).exists() for marker in ("app_config.json", "project_config_blank.json", ".git"))
+
+
+def is_packaged_app() -> bool:
+    return bool(getattr(sys, "frozen", False))
 
 
 def find_project_config_by_project_id(project_id: str, root: Path) -> Path | None:

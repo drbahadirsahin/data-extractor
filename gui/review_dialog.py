@@ -100,7 +100,8 @@ class ReviewDialog(QDialog):
         self.form_event_map = dict(bundle.config.form_event_map or {}) if bundle is not None else {}
 
         self.setWindowTitle(tr("review_dialog_title", self.language))
-        self.setMinimumSize(1280, 760)
+        self.setMinimumSize(900, 560)
+        self.resize_for_available_screen()
 
         root = QVBoxLayout(self)
         root.setSpacing(16)
@@ -156,6 +157,20 @@ class ReviewDialog(QDialog):
         self.populate_patient_list()
         self.refresh_summary()
         self.refresh_patient_action_state()
+
+    def resize_for_available_screen(self) -> None:
+        screen = None
+        if self.parentWidget() is not None and self.parentWidget().windowHandle() is not None:
+            screen = self.parentWidget().windowHandle().screen()
+        screen = screen or QApplication.primaryScreen()
+        if screen is None:
+            self.resize(1180, 720)
+            return
+        available = screen.availableGeometry()
+        margin = 48
+        target_width = min(1180, max(self.minimumWidth(), available.width() - margin))
+        target_height = min(720, max(self.minimumHeight(), available.height() - margin))
+        self.resize(target_width, target_height)
 
     def refresh_submission_metadata(self, *, api_url: str, api_token: str) -> None:
         if self.bundle is None:

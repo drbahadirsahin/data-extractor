@@ -55,10 +55,12 @@ class ClinicalMainWindow:
     def __init__(self, runtime: RuntimeContext) -> None:
         from PySide6.QtCore import Qt
         from PySide6.QtWidgets import (
+            QFrame,
             QHBoxLayout,
             QLabel,
             QMainWindow,
             QPushButton,
+            QScrollArea,
             QStackedWidget,
             QVBoxLayout,
             QWidget,
@@ -143,7 +145,7 @@ class ClinicalMainWindow:
             button.clicked.connect(lambda checked=False, key=page.key: self.set_page(key))
             self.nav_buttons[page.key] = button
             sidebar_layout.addWidget(button)
-            self.stack.addWidget(page.widget)
+            self.stack.addWidget(self.build_scroll_page(page.widget, QScrollArea, QFrame, Qt))
 
         sidebar_layout.addStretch(1)
         if self.show_advanced_ui:
@@ -168,6 +170,14 @@ class ClinicalMainWindow:
 
         self.refresh_connection_state()
         self.set_page("home")
+
+    def build_scroll_page(self, widget: Any, scroll_area_cls: Any, frame_cls: Any, qt_cls: Any) -> Any:
+        scroll = scroll_area_cls()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(frame_cls.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(qt_cls.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setWidget(widget)
+        return scroll
 
     def refresh_connection_state(self) -> None:
         project_name = self.runtime.settings.redcap.selected_project_name

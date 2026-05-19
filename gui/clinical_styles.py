@@ -169,6 +169,7 @@ QPushButton {
     border-radius: 7px;
     padding: 10px 14px;
     font-weight: 700;
+    min-height: 24px;
 }
 
 QPushButton:hover {
@@ -228,6 +229,7 @@ QLineEdit, QComboBox {
     border: 1px solid #d8d5cc;
     border-radius: 7px;
     padding: 9px 10px;
+    min-height: 22px;
     selection-background-color: #b8e4dc;
 }
 

@@ -8,6 +8,7 @@ from unittest.mock import patch
 
 from workspace_flow import (
     build_scoped_project_config,
+    default_search_roots,
     ensure_server_metadata_in_config,
     ensure_project_config,
     find_project_config_by_project_id,
@@ -380,6 +381,42 @@ class WorkspaceFlowTests(unittest.TestCase):
             payload = json.loads(config_path.read_text(encoding="utf-8"))
             self.assertEqual(payload["form_labels"]["demographics"], "Demografi")
             self.assertEqual(payload["repeating_forms"], ["demographics"])
+
+    def test_default_search_roots_do_not_scan_cwd_in_packaged_app(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            app_home = root / ".llm_extractor_data"
+            projects = app_home / "projects"
+            projects.mkdir(parents=True)
+            (root / "app_config.json").write_text("{}", encoding="utf-8")
+
+            original_cwd = Path.cwd()
+            try:
+                os.chdir(root)
+                with patch("workspace_flow.is_packaged_app", return_value=True):
+                    roots = default_search_roots(app_home)
+            finally:
+                os.chdir(original_cwd)
+
+            self.assertEqual(roots, [projects.resolve()])
+
+    def test_default_search_roots_allow_project_cwd_for_dev(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            app_home = root / ".llm_extractor_data"
+            projects = app_home / "projects"
+            projects.mkdir(parents=True)
+            (root / "app_config.json").write_text("{}", encoding="utf-8")
+
+            original_cwd = Path.cwd()
+            try:
+                os.chdir(root)
+                with patch("workspace_flow.is_packaged_app", return_value=False):
+                    roots = default_search_roots(app_home)
+            finally:
+                os.chdir(original_cwd)
+
+            self.assertEqual(roots, [projects.resolve(), root.resolve()])
 
 
 if __name__ == "__main__":

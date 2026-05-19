@@ -12,7 +12,10 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import time
 from typing import Any
+from urllib import request
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from http_client import urlopen
 from release_profile import app_version, update_settings
@@ -52,11 +55,26 @@ def check_for_update(app_config: dict[str, Any]) -> dict[str, Any] | None:
 
 
 def fetch_json(url: str, *, timeout_seconds: int) -> dict[str, Any]:
-    with urlopen(url, timeout=timeout_seconds) as response:
+    manifest_request = request.Request(
+        cache_busted_url(url),
+        headers={
+            "Cache-Control": "no-cache",
+            "Pragma": "no-cache",
+            "User-Agent": f"LLMExtractor/{int(time.time())}",
+        },
+    )
+    with urlopen(manifest_request, timeout=timeout_seconds) as response:
         payload = json.loads(response.read().decode("utf-8"))
     if not isinstance(payload, dict):
         raise UpdateError("Update manifest is not a JSON object.")
     return payload
+
+
+def cache_busted_url(url: str) -> str:
+    split = urlsplit(str(url))
+    query = dict(parse_qsl(split.query, keep_blank_values=True))
+    query["_llm_extractor_cache_bust"] = str(int(time.time() * 1000))
+    return urlunsplit((split.scheme, split.netloc, split.path, urlencode(query), split.fragment))
 
 
 def platform_update_payload(manifest: dict[str, Any]) -> dict[str, Any] | None:

@@ -8,6 +8,7 @@ from settings_store import PORTABLE_DIRNAME, PORTABLE_MARKER, resolve_app_home
 from updater import (
     UpdateError,
     build_posix_apply_update_script,
+    cache_busted_url,
     is_macos_app_translocated,
     macos_needs_portable_repair,
     macos_portable_app_bundle,
@@ -52,6 +53,14 @@ class ReleaseProfileUpdaterTests(unittest.TestCase):
         self.assertFalse(version_is_newer("0.1.0-early.9", "0.1.0-early.10"))
         self.assertTrue(version_is_newer("0.1.1-early.2", "0.1.1-early.1"))
         self.assertTrue(version_is_newer("0.1.1-early.3", "0.1.1-early.2"))
+        self.assertTrue(version_is_newer("0.1.1-early.4", "0.1.1-early.3"))
+
+    def test_cache_busted_url_preserves_existing_query(self):
+        with patch("updater.time.time", return_value=1234.567):
+            result = cache_busted_url("https://example.test/update_manifest.json?channel=early")
+
+        self.assertIn("channel=early", result)
+        self.assertIn("_llm_extractor_cache_bust=1234567", result)
 
     def test_platform_payload_uses_specific_platform_first(self):
         manifest = {

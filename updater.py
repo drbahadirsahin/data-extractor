@@ -248,6 +248,7 @@ def stage_update_and_restart(archive_path: Path) -> None:
             script_path=script_path,
             launcher_path=launcher_path,
         )
+        append_update_log(stage_log, f"TEMP_LAUNCHER_LOG={launcher_path.parent / 'apply_update_launcher.log'}")
         startupinfo = subprocess.STARTUPINFO()
         startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
         startupinfo.wShowWindow = 7
@@ -496,9 +497,7 @@ def build_windows_update_launcher_script(*, script_path: Path, app_root: Path) -
         setlocal
         set "APP_ROOT={str(app_root)}"
         set "PS_SCRIPT={str(script_path)}"
-        set "DATA_DIR=%APP_ROOT%\\.llm_extractor_data"
-        if not exist "%DATA_DIR%" mkdir "%DATA_DIR%" >nul 2>nul
-        set "LOG=%DATA_DIR%\\apply_update_launcher.log"
+        set "LOG=%~dp0apply_update_launcher.log"
         echo %DATE% %TIME% Starting Windows update launcher>> "%LOG%"
         echo APP_ROOT=%APP_ROOT%>> "%LOG%"
         echo PS_SCRIPT=%PS_SCRIPT%>> "%LOG%"
@@ -508,6 +507,8 @@ def build_windows_update_launcher_script(*, script_path: Path, app_root: Path) -
         "%PS_EXE%" -NoProfile -ExecutionPolicy Bypass -File "%PS_SCRIPT%" >> "%LOG%" 2>&1
         set "EXIT_CODE=%ERRORLEVEL%"
         echo %DATE% %TIME% PowerShell exited with %EXIT_CODE%>> "%LOG%"
+        set "DATA_DIR=%APP_ROOT%\\.llm_extractor_data"
+        if exist "%DATA_DIR%" copy /Y "%LOG%" "%DATA_DIR%\\apply_update_launcher.log" >nul 2>nul
         exit /b %EXIT_CODE%
         """
     ).strip()

@@ -72,6 +72,7 @@ class ReleaseProfileUpdaterTests(unittest.TestCase):
         self.assertTrue(version_is_newer("0.1.1-early.17", "0.1.1-early.16"))
         self.assertTrue(version_is_newer("0.1.1-early.18", "0.1.1-early.17"))
         self.assertTrue(version_is_newer("0.1.1-early.19", "0.1.1-early.18"))
+        self.assertTrue(version_is_newer("0.1.1-early.20", "0.1.1-early.19"))
 
     def test_cache_busted_url_preserves_existing_query(self):
         with patch("updater.time.time", return_value=1234.567):
@@ -257,13 +258,16 @@ class ReleaseProfileUpdaterTests(unittest.TestCase):
         self.assertIn("Start-Process -FilePath $NewExecutable -WorkingDirectory $AppRoot", script)
         self.assertIn("Restored backup after failed update", script)
 
-    def test_windows_update_launcher_writes_persistent_diagnostics(self):
+    def test_windows_update_launcher_writes_temp_diagnostics_then_copies_back(self):
         script = build_windows_update_launcher_script(
             script_path=Path("C:/Temp/apply_update.ps1"),
             app_root=Path("C:/fld/LLMExtractor-0.1.1-early.14-windows-x64"),
         )
 
+        self.assertIn('set "LOG=%~dp0apply_update_launcher.log"', script)
         self.assertIn("apply_update_launcher.log", script)
+        self.assertIn('copy /Y "%LOG%" "%DATA_DIR%\\apply_update_launcher.log"', script)
+        self.assertNotIn('set "LOG=%DATA_DIR%\\apply_update_launcher.log"', script)
         self.assertIn("WindowsPowerShell\\v1.0\\powershell.exe", script)
         self.assertIn("-ExecutionPolicy Bypass -File", script)
         self.assertIn("PowerShell exited with", script)

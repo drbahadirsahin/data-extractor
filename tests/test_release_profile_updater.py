@@ -70,6 +70,7 @@ class ReleaseProfileUpdaterTests(unittest.TestCase):
         self.assertTrue(version_is_newer("0.1.1-early.15", "0.1.1-early.14"))
         self.assertTrue(version_is_newer("0.1.1-early.16", "0.1.1-early.15"))
         self.assertTrue(version_is_newer("0.1.1-early.17", "0.1.1-early.16"))
+        self.assertTrue(version_is_newer("0.1.1-early.18", "0.1.1-early.17"))
 
     def test_cache_busted_url_preserves_existing_query(self):
         with patch("updater.time.time", return_value=1234.567):
@@ -245,8 +246,11 @@ class ReleaseProfileUpdaterTests(unittest.TestCase):
         )
 
         self.assertIn("$PersistentLog = Join-Path $OldDataDir \"apply_update.log\"", script)
-        self.assertIn("Move current app root to backup", script)
-        self.assertIn("Move-Item -LiteralPath $AppRoot -Destination $BackupRoot", script)
+        self.assertIn("Copy current app root to backup", script)
+        self.assertIn("Remove current app root", script)
+        self.assertIn("function Copy-DirectoryChildren", script)
+        self.assertIn("Copy-DirectoryChildren $AppRoot $BackupRoot", script)
+        self.assertNotIn("Move-Item -LiteralPath $AppRoot -Destination $BackupRoot", script)
         self.assertIn("Move-Item -LiteralPath $SourceRoot -Destination $AppRoot", script)
         self.assertIn("Copy-Item -LiteralPath $PreservedDataDir -Destination $NewDataDir", script)
         self.assertIn("Start-Process -FilePath $NewExecutable -WorkingDirectory $AppRoot", script)

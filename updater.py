@@ -564,6 +564,45 @@ def build_windows_apply_update_script(*, archive_path: Path, app_root: Path, exe
             throw "$Description failed after $Attempts attempts"
         }}
 
+        function Copy-DirectoryChildren($SourceDir, $DestinationDir) {{
+            if (-not (Test-Path -LiteralPath $SourceDir)) {{
+                return
+            }}
+            if (-not (Test-Path -LiteralPath $DestinationDir)) {{
+                New-Item -ItemType Directory -Path $DestinationDir -Force | Out-Null
+            }}
+            $Items = Get-ChildItem -LiteralPath $SourceDir -Force
+            foreach ($Item in $Items) {{
+                $Destination = Join-Path $DestinationDir $Item.Name
+                if (Test-Path -LiteralPath $Destination) {{
+                    Write-UpdateLog "Removing existing copied backup child before retry: $Destination"
+                    Remove-Item -LiteralPath $Destination -Recurse -Force
+                }}
+                Write-UpdateLog "Copying child $($Item.FullName) to $Destination"
+                Copy-Item -LiteralPath $Item.FullName -Destination $Destination -Recurse -Force
+            }}
+        }}
+
+        function Remove-AppRoot {{
+            $script:PersistentLoggingEnabled = $false
+            if (-not (Test-Path -LiteralPath $AppRoot)) {{
+                return
+            }}
+            Remove-Item -LiteralPath $AppRoot -Recurse -Force
+        }}
+
+        function Restore-BackupIfPresent {{
+            if (-not (Test-Path -LiteralPath $BackupRoot)) {{
+                return
+            }}
+            if (Test-Path -LiteralPath $AppRoot) {{
+                Remove-Item -LiteralPath $AppRoot -Recurse -Force
+            }}
+            Move-Item -LiteralPath $BackupRoot -Destination $AppRoot
+            $script:PersistentLoggingEnabled = $true
+            Write-UpdateLog "Restored backup after failed update"
+        }}
+
         try {{
             Write-UpdateLog "Starting update apply"
             Write-UpdateLog "APP_ROOT=$AppRoot"
@@ -608,9 +647,11 @@ def build_windows_apply_update_script(*, archive_path: Path, app_root: Path, exe
                 }}
             }}
             if (Test-Path -LiteralPath $AppRoot) {{
-                Invoke-WithRetry "Move current app root to backup" {{
-                    $script:PersistentLoggingEnabled = $false
-                    Move-Item -LiteralPath $AppRoot -Destination $BackupRoot
+                Invoke-WithRetry "Copy current app root to backup" {{
+                    Copy-DirectoryChildren $AppRoot $BackupRoot
+                }}
+                Invoke-WithRetry "Remove current app root" {{
+                    Remove-AppRoot
                 }}
             }}
             New-Item -ItemType Directory -Path $ParentRoot -Force | Out-Null
@@ -660,13 +701,10 @@ def build_windows_apply_update_script(*, archive_path: Path, app_root: Path, exe
             Write-UpdateLog "Update apply finished"
         }} catch {{
             Write-UpdateLog "Update apply failed: $($_.Exception.Message)"
-            if ((-not (Test-Path -LiteralPath $AppRoot)) -and (Test-Path -LiteralPath $BackupRoot)) {{
-                try {{
-                    Move-Item -LiteralPath $BackupRoot -Destination $AppRoot
-                    Write-UpdateLog "Restored backup after failed update"
-                }} catch {{
-                    Write-UpdateLog "Backup restore failed: $($_.Exception.Message)"
-                }}
+            try {{
+                Restore-BackupIfPresent
+            }} catch {{
+                Write-UpdateLog "Backup restore failed: $($_.Exception.Message)"
             }}
             throw
         }}

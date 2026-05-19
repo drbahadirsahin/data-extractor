@@ -263,6 +263,30 @@ def is_ollama_base_url(base_url: str) -> bool:
     return normalized.endswith(":11434") or normalized in {"http://localhost", "http://127.0.0.1"}
 
 
+def fit_dialog_size_to_available_area(
+    *,
+    available_width: int,
+    available_height: int,
+    preferred_width: int,
+    preferred_height: int,
+    minimum_width: int,
+    minimum_height: int,
+    margin: int = 72,
+) -> tuple[int, int, int, int]:
+    usable_width = max(1, available_width - margin)
+    usable_height = max(1, available_height - margin)
+    target_width = min(preferred_width, usable_width)
+    target_height = min(preferred_height, usable_height)
+    effective_min_width = min(minimum_width, usable_width)
+    effective_min_height = min(minimum_height, usable_height)
+    return (
+        max(effective_min_width, target_width),
+        max(effective_min_height, target_height),
+        effective_min_width,
+        effective_min_height,
+    )
+
+
 class WorkspacePage:
     def __init__(self, runtime: RuntimeContext) -> None:
         from PySide6.QtWidgets import (
@@ -482,6 +506,77 @@ class WorkspacePage:
         root.addLayout(actions_row)
 
         self.refresh_redcap_projects()
+
+    def resize_dialog_for_available_screen(
+        self,
+        dialog,
+        *,
+        preferred_width: int,
+        preferred_height: int,
+        minimum_width: int,
+        minimum_height: int,
+        margin: int = 72,
+    ) -> None:
+        from PySide6.QtCore import QPoint, QTimer
+        from PySide6.QtWidgets import QApplication
+
+        def current_screen():
+            if dialog.windowHandle() is not None and dialog.windowHandle().screen() is not None:
+                return dialog.windowHandle().screen()
+            if self.widget.windowHandle() is not None and self.widget.windowHandle().screen() is not None:
+                return self.widget.windowHandle().screen()
+            return QApplication.primaryScreen()
+
+        def apply_geometry() -> None:
+            screen = current_screen()
+            if screen is None:
+                dialog.setMinimumSize(minimum_width, minimum_height)
+                dialog.resize(preferred_width, preferred_height)
+                return
+
+            available = screen.availableGeometry()
+            target_width, target_height, min_width, min_height = fit_dialog_size_to_available_area(
+                available_width=available.width(),
+                available_height=available.height(),
+                preferred_width=preferred_width,
+                preferred_height=preferred_height,
+                minimum_width=minimum_width,
+                minimum_height=minimum_height,
+                margin=margin,
+            )
+            dialog.setMinimumSize(min_width, min_height)
+            dialog.resize(target_width, target_height)
+
+            frame = dialog.frameGeometry()
+            geometry = dialog.geometry()
+            frame_extra_width = max(0, frame.width() - geometry.width())
+            frame_extra_height = max(0, frame.height() - geometry.height())
+            max_width = max(1, available.width() - 16 - frame_extra_width)
+            max_height = max(1, available.height() - 16 - frame_extra_height)
+            if dialog.width() > max_width or dialog.height() > max_height:
+                adjusted_width = min(dialog.width(), max_width)
+                adjusted_height = min(dialog.height(), max_height)
+                dialog.setMinimumSize(
+                    min(dialog.minimumWidth(), adjusted_width),
+                    min(dialog.minimumHeight(), adjusted_height),
+                )
+                dialog.resize(adjusted_width, adjusted_height)
+                frame = dialog.frameGeometry()
+
+            frame.moveCenter(available.center())
+            if frame.width() <= available.width():
+                left = max(available.left(), min(frame.left(), available.right() - frame.width() + 1))
+            else:
+                left = available.left()
+            if frame.height() <= available.height():
+                top = max(available.top(), min(frame.top(), available.bottom() - frame.height() + 1))
+            else:
+                top = available.top()
+            offset = dialog.geometry().topLeft() - dialog.frameGeometry().topLeft()
+            dialog.move(QPoint(left, top) + offset)
+
+        apply_geometry()
+        QTimer.singleShot(0, apply_geometry)
 
     def refresh_redcap_projects(self) -> None:
         settings = self.runtime.settings
@@ -1761,12 +1856,15 @@ class WorkspacePage:
             QDialog,
             QDialogButtonBox,
             QFormLayout,
+            QFrame,
             QHeaderView,
             QHBoxLayout,
             QPushButton,
+            QScrollArea,
             QTableWidget,
             QTableWidgetItem,
             QVBoxLayout,
+            QWidget,
         )
 
         headers = list(table.headers)
@@ -1775,13 +1873,24 @@ class WorkspacePage:
 
         dialog = QDialog(self.widget)
         dialog.setWindowTitle(tr("excel_column_mapping_title", self.language))
-        dialog.setMinimumSize(1120, 720)
+        dialog.setMinimumSize(900, 520)
         layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(18, 18, 18, 18)
         layout.setSpacing(12)
+
+        scroll = QScrollArea()
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setWidgetResizable(True)
+        content = QWidget()
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setSpacing(12)
+        scroll.setWidget(content)
+        layout.addWidget(scroll, 1)
 
         info = QLabel(tr("excel_column_mapping_hint", self.language))
         info.setWordWrap(True)
-        layout.addWidget(info)
+        content_layout.addWidget(info)
 
         form = QFormLayout()
         patient_id_input = QComboBox()
@@ -1796,17 +1905,17 @@ class WorkspacePage:
             patient_id_input.setCurrentIndex(detected_index)
 
         form.addRow(tr("excel_patient_id_column", self.language), patient_id_input)
-        layout.addLayout(form)
+        content_layout.addLayout(form)
 
         llm_unmatched_input = QCheckBox(tr("excel_mapping_use_llm_unmatched", self.language))
         llm_unmatched_input.setChecked(False)
-        layout.addWidget(llm_unmatched_input)
+        content_layout.addWidget(llm_unmatched_input)
 
         llm_value_normalization_input = QCheckBox(
             tr("excel_mapping_use_llm_value_normalization", self.language)
         )
         llm_value_normalization_input.setChecked(False)
-        layout.addWidget(llm_value_normalization_input)
+        content_layout.addWidget(llm_value_normalization_input)
 
         mapping_table = QTableWidget(0, 4)
         mapping_table.setHorizontalHeaderLabels(
@@ -1822,6 +1931,7 @@ class WorkspacePage:
         mapping_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         mapping_table.setAlternatingRowColors(True)
         mapping_table.setShowGrid(False)
+        mapping_table.setMinimumHeight(220)
         mapping_table.verticalHeader().setVisible(False)
         mapping_table.verticalHeader().setDefaultSectionSize(48)
         mapping_table.verticalHeader().setMinimumSectionSize(44)
@@ -1830,12 +1940,12 @@ class WorkspacePage:
         mapping_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         mapping_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
         mapping_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
-        layout.addWidget(mapping_table, 1)
+        content_layout.addWidget(mapping_table, 1)
 
         summary_label = QLabel("")
         summary_label.setObjectName("MutedLabel")
         summary_label.setWordWrap(True)
-        layout.addWidget(summary_label)
+        content_layout.addWidget(summary_label)
 
         field_choices = [("", tr("excel_mapping_unmapped", self.language))]
         field_search_labels: list[str] = []
@@ -2075,7 +2185,7 @@ class WorkspacePage:
         controls.addWidget(add_row_button)
         controls.addWidget(remove_row_button)
         controls.addStretch(1)
-        layout.addLayout(controls)
+        content_layout.addLayout(controls)
 
         def default_mapping_column() -> str | None:
             patient_id_column = str(patient_id_input.currentData() or "")
@@ -2167,6 +2277,13 @@ class WorkspacePage:
             dialog.accept()
 
         button_box.accepted.connect(validate_and_accept)
+        self.resize_dialog_for_available_screen(
+            dialog,
+            preferred_width=1120,
+            preferred_height=720,
+            minimum_width=900,
+            minimum_height=520,
+        )
         if dialog.exec() == 0:
             return None
         return selected_options

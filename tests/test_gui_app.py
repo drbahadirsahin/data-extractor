@@ -7,6 +7,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from gui.app import resolve_ui_mode
 from gui.clinical_main_window import ClinicalImportPage, ClinicalRedcapPage, build_default_llm_settings
+from gui.workspace_page import fit_dialog_size_to_available_area
 from redcap_client import RedcapProject
 from secrets_store import SecretsStore
 from settings_store import AppSettings, SettingsStore
@@ -26,6 +27,21 @@ class GuiAppTests(unittest.TestCase):
         self.assertEqual(resolve_ui_mode({"ui": {"mode": "clinical"}}, ["app", "--legacy-ui"]), "legacy")
         with patch.dict("os.environ", {"LLM_EXTRACTOR_UI_MODE": "dev"}, clear=False):
             self.assertEqual(resolve_ui_mode({}, ["app"]), "legacy")
+
+    def test_dialog_size_is_bounded_by_available_screen(self):
+        width, height, min_width, min_height = fit_dialog_size_to_available_area(
+            available_width=1147,
+            available_height=697,
+            preferred_width=1120,
+            preferred_height=720,
+            minimum_width=900,
+            minimum_height=520,
+        )
+
+        self.assertEqual(width, 1075)
+        self.assertEqual(height, 625)
+        self.assertEqual(min_width, 900)
+        self.assertEqual(min_height, 520)
 
     def test_build_default_llm_settings_keeps_api_secret_indirect(self):
         runtime = SimpleNamespace(

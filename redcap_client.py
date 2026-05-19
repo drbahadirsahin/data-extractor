@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from typing import Any
 from urllib import error, parse, request
 
+from http_client import urlopen
+
 
 @dataclass
 class RedcapProject:
@@ -163,7 +165,7 @@ class RedcapClient:
             },
             method="POST",
         )
-        with request.urlopen(http_request, timeout=self.timeout_seconds) as response:
+        with urlopen(http_request, timeout=self.timeout_seconds) as response:
             return response.read().decode("utf-8")
 
     def _post_form(self, payload: dict[str, Any]) -> str:

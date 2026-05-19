@@ -11,8 +11,8 @@ import sys
 import tempfile
 import textwrap
 from typing import Any
-from urllib import request
 
+from http_client import urlopen
 from release_profile import app_version, update_settings
 
 
@@ -41,7 +41,7 @@ def check_for_update(app_config: dict[str, Any]) -> dict[str, Any] | None:
 
 
 def fetch_json(url: str, *, timeout_seconds: int) -> dict[str, Any]:
-    with request.urlopen(url, timeout=timeout_seconds) as response:
+    with urlopen(url, timeout=timeout_seconds) as response:
         payload = json.loads(response.read().decode("utf-8"))
     if not isinstance(payload, dict):
         raise UpdateError("Update manifest is not a JSON object.")
@@ -96,7 +96,7 @@ def download_update(payload: dict[str, Any], *, progress_callback=None) -> Path:
     if not url:
         raise UpdateError("Update payload does not contain a URL.")
     destination = Path(tempfile.mkdtemp(prefix="llm_extractor_update_")) / "update.zip"
-    with request.urlopen(url, timeout=int(payload.get("timeout_seconds", 120))) as response:
+    with urlopen(url, timeout=int(payload.get("timeout_seconds", 120))) as response:
         total = int(response.headers.get("Content-Length") or 0)
         downloaded = 0
         with destination.open("wb") as handle:

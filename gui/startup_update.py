@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from gui.i18n import tr
-from release_profile import startup_updates_enabled
+from release_profile import app_version, startup_updates_enabled
 from updater import check_for_update, download_update, is_frozen_app, stage_update_and_restart
 
 
@@ -91,6 +91,7 @@ def run_startup_update_check_async(app, runtime: Any) -> bool:
         @Slot()
         def run(self) -> None:
             try:
+                logging.info("Startup update check started: current=%s", app_version(self._app_config))
                 self.status_changed.emit("checking", None)
                 update = check_for_update(self._app_config)
                 if not update:
@@ -130,14 +131,16 @@ def run_startup_update_check_async(app, runtime: Any) -> bool:
         def start(self) -> None:
             self._thread.start()
 
-        def _ensure_progress(self):
+        def _ensure_progress(self, label_text: str | None = None):
             if self._progress is not None:
+                if label_text is not None:
+                    self._progress.setLabelText(label_text)
                 return self._progress
             from PySide6.QtCore import Qt
             from PySide6.QtWidgets import QProgressDialog
 
             self._progress = QProgressDialog(
-                tr("update_downloading", self._language, version=""),
+                label_text or tr("update_checking", self._language),
                 "",
                 0,
                 0,
@@ -151,8 +154,12 @@ def run_startup_update_check_async(app, runtime: Any) -> bool:
 
         def _on_status_changed(self, status: str, payload: object) -> None:
             logging.info("Startup update status: %s", status)
+            if status == "checking":
+                self._ensure_progress(tr("update_checking", self._language))
             if status == "downloading":
-                progress = self._ensure_progress()
+                progress = self._ensure_progress(
+                    tr("update_downloading", self._language, version=str(payload or ""))
+                )
                 progress.setLabelText(
                     tr("update_downloading", self._language, version=str(payload or ""))
                 )
@@ -180,17 +187,22 @@ def run_startup_update_check_async(app, runtime: Any) -> bool:
 
         def _on_no_update(self) -> None:
             logging.info("No startup update available")
+            if self._progress is not None:
+                self._progress.close()
+                self._progress = None
 
         def _on_failed(self, error: str) -> None:
             from PySide6.QtWidgets import QMessageBox
 
             logging.warning("Startup update check failed: %s", error)
             if self._progress is not None:
-                QMessageBox.warning(
-                    None,
-                    tr("update_title", self._language),
-                    tr("update_failed", self._language, error=error),
-                )
+                self._progress.close()
+                self._progress = None
+            QMessageBox.warning(
+                None,
+                tr("update_title", self._language),
+                tr("update_failed", self._language, error=error),
+            )
 
         def _on_thread_finished(self) -> None:
             if self._progress is not None:

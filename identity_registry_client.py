@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Any
 from urllib import error, parse, request
 
+from http_client import urlopen
 from redcap_client import build_redcap_api_url_candidates, extract_xml_error_message
 
 
@@ -111,7 +112,7 @@ class IdentityRegistryClient:
             },
             method="POST",
         )
-        with request.urlopen(http_request, timeout=self.config.timeout_seconds) as response:
+        with urlopen(http_request, timeout=self.config.timeout_seconds) as response:
             raw = response.read().decode("utf-8")
 
         stripped = raw.strip()

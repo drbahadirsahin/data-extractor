@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from typing import Any
 from urllib import error, request
 
+from http_client import urlopen
+
 DEFAULT_HTTP_HEADERS = {
     "Accept": "application/json",
     "User-Agent": (
@@ -297,7 +299,7 @@ def post_json(
     body = json.dumps(payload).encode("utf-8")
     http_request = request.Request(url=url, data=body, headers=request_headers, method="POST")
     try:
-        with request.urlopen(http_request, timeout=timeout_seconds) as response:
+        with urlopen(http_request, timeout=timeout_seconds) as response:
             response_body = response.read().decode("utf-8")
     except error.HTTPError as exc:
         error_body = exc.read().decode("utf-8", errors="replace")
@@ -343,7 +345,7 @@ def post_json_stream(
     thinking_parts: list[str] = []
     final_chunk: dict[str, Any] = {}
     try:
-        with request.urlopen(http_request, timeout=timeout_seconds) as response:
+        with urlopen(http_request, timeout=timeout_seconds) as response:
             for raw_line in response:
                 line = raw_line.decode("utf-8", errors="replace").strip()
                 if not line:

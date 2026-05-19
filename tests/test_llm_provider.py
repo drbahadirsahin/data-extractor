@@ -134,7 +134,7 @@ class LlmProviderTests(unittest.TestCase):
             hdrs=None,
             fp=io.BytesIO(b"error code: 1010"),
         )
-        with patch("llm_provider.request.urlopen", side_effect=http_error):
+        with patch("llm_provider.urlopen", side_effect=http_error):
             with self.assertRaises(ProviderHTTPError) as exc:
                 post_json(
                     url="https://example.com",

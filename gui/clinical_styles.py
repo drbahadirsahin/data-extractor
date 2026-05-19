@@ -84,6 +84,12 @@ QLabel#SmallMutedLabel {
     font-size: 12px;
 }
 
+QLabel#VersionLabel {
+    color: #8fa5af;
+    font-size: 12px;
+    padding: 6px 2px 0 2px;
+}
+
 QLabel#StepLabel {
     background: #ffffff;
     color: #435261;

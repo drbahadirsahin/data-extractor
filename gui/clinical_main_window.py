@@ -5,7 +5,7 @@ from typing import Any, Callable
 
 from runtime_context import RuntimeContext
 from gui.i18n import tr
-from release_profile import show_advanced_ui
+from release_profile import app_version, show_advanced_ui
 from settings_store import RedcapProjectToken
 from workspace_flow import ensure_project_config
 
@@ -147,6 +147,10 @@ class ClinicalMainWindow:
             mode_note.setObjectName("SmallMutedLabel")
             mode_note.setWordWrap(True)
             sidebar_layout.addWidget(mode_note)
+        version_label = QLabel(tr("clinical_version_label", self.language, version=app_version(runtime.app_config)))
+        version_label.setObjectName("VersionLabel")
+        version_label.setWordWrap(True)
+        sidebar_layout.addWidget(version_label)
 
         content = QWidget()
         content_layout = QVBoxLayout(content)

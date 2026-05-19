@@ -6,7 +6,7 @@ from pathlib import Path
 import sys
 import traceback
 
-from settings_store import fallback_app_home, resolve_app_home
+from settings_store import ensure_app_home, fallback_app_home
 
 _LOG_HANDLE = None
 
@@ -32,9 +32,11 @@ def install_startup_logging() -> Path:
 
 def startup_log_path() -> Path:
     try:
-        return resolve_app_home() / "llm_extractor.log"
+        return ensure_app_home() / "llm_extractor.log"
     except Exception:
-        return fallback_app_home() / "llm_extractor.log"
+        fallback = fallback_app_home()
+        fallback.mkdir(parents=True, exist_ok=True)
+        return fallback / "llm_extractor.log"
 
 
 def log_uncaught_exception(exc_type, exc_value, exc_traceback) -> None:

@@ -22,6 +22,7 @@ def launch_gui(argv: list[str] | None = None) -> int:
     logging.info("Launching LLM Extractor")
     runtime = bootstrap_runtime()
     app = QApplication(argv or sys.argv)
+    logging.info("Qt platform: %s", app.platformName())
     install_qt_translations(app, runtime.settings.ui.language, QLibraryInfo, QLocale, QTranslator)
     app.setApplicationName("LLM Extractor")
     app.setApplicationVersion(app_version(runtime.app_config))
@@ -40,9 +41,10 @@ def launch_gui(argv: list[str] | None = None) -> int:
         window = ClinicalMainWindow(runtime)
     window.show()
     activate_window(window)
+    app.processEvents()
     QTimer.singleShot(250, lambda: activate_window(window))
     QTimer.singleShot(750, lambda: activate_window(window))
-    QTimer.singleShot(1000, lambda: run_deferred_update_check(app, runtime))
+    QTimer.singleShot(2500, lambda: run_deferred_update_check(app, runtime))
     logging.info("Main window shown; log file: %s", log_path)
     return app.exec()
 
@@ -82,17 +84,40 @@ def normalize_ui_mode(value: str) -> str:
 def activate_window(window) -> None:
     target = getattr(window, "_window", window)
     try:
+        from PySide6.QtCore import Qt
+        from PySide6.QtWidgets import QApplication
+
+        screen = QApplication.primaryScreen()
+        if screen is not None:
+            available = screen.availableGeometry()
+            frame = target.frameGeometry()
+            frame.moveCenter(available.center())
+            target.move(frame.topLeft())
+        target.setWindowState(
+            (target.windowState() & ~Qt.WindowState.WindowMinimized)
+            | Qt.WindowState.WindowActive
+        )
         target.showNormal()
         target.raise_()
         target.activateWindow()
+        geometry = target.geometry()
+        logging.info(
+            "Window activation requested: visible=%s active=%s geometry=%s,%s %sx%s",
+            target.isVisible(),
+            target.isActiveWindow(),
+            geometry.x(),
+            geometry.y(),
+            geometry.width(),
+            geometry.height(),
+        )
     except RuntimeError:
         logging.exception("Could not activate main window")
 
 
 def run_deferred_update_check(app, runtime) -> None:
     try:
-        from gui.startup_update import run_startup_update_check
+        from gui.startup_update import run_startup_update_check_async
 
-        run_startup_update_check(app, runtime)
+        run_startup_update_check_async(app, runtime)
     except Exception as exc:
         log_exception("Deferred update check failed", exc)

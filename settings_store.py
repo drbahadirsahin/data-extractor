@@ -180,6 +180,8 @@ def resolve_app_home(app_home: str | Path | None = None) -> Path:
     portable_root = find_portable_root()
     if portable_root is not None:
         return (portable_root / PORTABLE_DIRNAME).resolve()
+    if is_frozen_app():
+        return fallback_app_home()
     return (Path.cwd().resolve() / PORTABLE_DIRNAME).resolve()
 
 

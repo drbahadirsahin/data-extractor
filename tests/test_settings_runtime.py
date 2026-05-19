@@ -125,14 +125,14 @@ class SettingsAndRuntimeTests(unittest.TestCase):
             finally:
                 os.chdir(original_cwd)
 
-    def test_frozen_app_without_portable_marker_uses_current_working_directory(self) -> None:
+    def test_frozen_app_without_portable_marker_uses_fallback_directory(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             with patch("settings_store.sys.frozen", True, create=True):
                 with patch("settings_store.frozen_app_roots", return_value=[Path(temp_dir) / "LLMExtractor.app"]):
                     with patch("settings_store.Path.cwd", return_value=Path(temp_dir)):
                         self.assertEqual(
                             resolve_app_home(),
-                            (Path(temp_dir) / PORTABLE_DIRNAME).resolve(),
+                            fallback_app_home(),
                         )
 
     def test_fallback_app_home_is_user_owned_location(self) -> None:

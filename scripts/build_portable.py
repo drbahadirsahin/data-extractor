@@ -5,12 +5,14 @@ import json
 import os
 from pathlib import Path
 import platform
+import re
 import shutil
 import subprocess
 import sys
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
+MACOS_BUNDLE_IDENTIFIER = "org.drbahadirsahin.dataextractor"
 
 
 def main() -> int:
@@ -34,7 +36,7 @@ def main() -> int:
     dist_dir = (ROOT / args.dist_dir).resolve()
     if not args.skip_pyinstaller:
         ensure_pyinstaller_available()
-        run_pyinstaller(args.name, staged_config, dist_dir)
+        run_pyinstaller(args.name, staged_config, dist_dir, version)
 
     package_dir = dist_dir / f"{args.name}-{version}-{platform_key}"
     if package_dir.exists():
@@ -88,7 +90,10 @@ def ensure_pyinstaller_available() -> None:
         ) from exc
 
 
-def run_pyinstaller(name: str, staged_config: Path, dist_dir: Path) -> None:
+def run_pyinstaller(name: str, staged_config: Path, dist_dir: Path, version: str) -> None:
+    if sys.platform == "darwin":
+        run_macos_pyinstaller(name, staged_config, dist_dir, version)
+        return
     separator = ";" if os.name == "nt" else ":"
     add_data = [
         f"{staged_config}{separator}.",
@@ -116,6 +121,121 @@ def run_pyinstaller(name: str, staged_config: Path, dist_dir: Path) -> None:
         command.extend(["--add-data", item])
     command.append(str(ROOT / "main.py"))
     subprocess.run(command, cwd=ROOT, check=True)
+
+
+def run_macos_pyinstaller(name: str, staged_config: Path, dist_dir: Path, version: str) -> None:
+    spec_path = ROOT / "build" / "pyinstaller" / f"{name}.spec"
+    spec_path.parent.mkdir(parents=True, exist_ok=True)
+    datas = [
+        (str(staged_config), "."),
+        (str(ROOT / "project_config_blank.json"), "."),
+        (str(ROOT / "prostate_dictionary.csv"), "."),
+    ]
+    info_plist = {
+        "CFBundleDisplayName": "LLM Extractor",
+        "CFBundleName": "LLM Extractor",
+        "CFBundleVersion": macos_bundle_build_version(version),
+        "NSPrincipalClass": "NSApplication",
+        "LSApplicationCategoryType": "public.app-category.medical",
+    }
+    spec_path.write_text(
+        build_macos_spec(
+            name=name,
+            entrypoint=ROOT / "main.py",
+            datas=datas,
+            version=macos_bundle_short_version(version),
+            info_plist=info_plist,
+        ),
+        encoding="utf-8",
+    )
+    command = [
+        sys.executable,
+        "-m",
+        "PyInstaller",
+        "--noconfirm",
+        "--clean",
+        "--distpath",
+        str(dist_dir),
+        "--workpath",
+        str(ROOT / "build" / "pyinstaller"),
+        str(spec_path),
+    ]
+    subprocess.run(command, cwd=ROOT, check=True)
+
+
+def build_macos_spec(
+    *,
+    name: str,
+    entrypoint: Path,
+    datas: list[tuple[str, str]],
+    version: str,
+    info_plist: dict[str, str],
+) -> str:
+    return f"""# -*- mode: python ; coding: utf-8 -*-
+
+
+a = Analysis(
+    [{str(entrypoint)!r}],
+    pathex=[],
+    binaries=[],
+    datas={datas!r},
+    hiddenimports=[],
+    hookspath=[],
+    hooksconfig={{}},
+    runtime_hooks=[],
+    excludes=[],
+    noarchive=False,
+    optimize=0,
+)
+pyz = PYZ(a.pure)
+
+exe = EXE(
+    pyz,
+    a.scripts,
+    [],
+    exclude_binaries=True,
+    name={name!r},
+    debug=False,
+    bootloader_ignore_signals=False,
+    strip=False,
+    upx=True,
+    console=False,
+    disable_windowed_traceback=False,
+    argv_emulation=False,
+    target_arch=None,
+    codesign_identity=None,
+    entitlements_file=None,
+)
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.datas,
+    strip=False,
+    upx=True,
+    upx_exclude=[],
+    name={name!r},
+)
+app = BUNDLE(
+    coll,
+    name={f"{name}.app"!r},
+    icon=None,
+    bundle_identifier={MACOS_BUNDLE_IDENTIFIER!r},
+    version={version!r},
+    info_plist={info_plist!r},
+)
+"""
+
+
+def macos_bundle_short_version(version: str) -> str:
+    short_version = str(version).strip().lstrip("v").split("-", 1)[0].strip()
+    return short_version or "0.0.0"
+
+
+def macos_bundle_build_version(version: str) -> str:
+    numbers = re.findall(r"\d+", str(version))
+    if not numbers:
+        return "0"
+    return ".".join(str(int(number)) for number in numbers[:4])
 
 
 def find_pyinstaller_artifact(dist_dir: Path, name: str) -> Path:

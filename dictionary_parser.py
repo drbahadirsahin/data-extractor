@@ -203,7 +203,6 @@ def apply_repeating_forms(config: ProjectConfig, field_specs: list[FieldSpec]) -
     for spec in field_specs:
         if spec.form_name in config.repeating_forms:
             spec.cardinality = "multiple"
-            spec.max_candidates = 10
             repeated_specs.append(spec)
         else:
             repeated_specs.append(spec)

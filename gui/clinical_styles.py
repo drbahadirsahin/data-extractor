@@ -237,6 +237,21 @@ QLineEdit:focus, QComboBox:focus {
     border: 1px solid #0f766e;
 }
 
+QComboBox#SidebarProjectCombo {
+    background: #edf8f4;
+    color: #0f766e;
+    border: 1px solid #b7ded5;
+    border-radius: 8px;
+    padding: 8px 10px;
+    font-weight: 650;
+}
+
+QComboBox#SidebarProjectCombo:disabled {
+    background: #fff5e5;
+    color: #9a5718;
+    border: 1px solid #f1cf9d;
+}
+
 QListWidget, QPlainTextEdit, QTableWidget {
     background: #ffffff;
     border: 1px solid #ded8cd;

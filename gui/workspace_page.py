@@ -549,6 +549,7 @@ class WorkspacePage:
                 api_url=api_url,
                 api_token=api_token,
                 default_llm_settings=self.build_project_llm_defaults(),
+                project_defaults=self.runtime.app_config.get("project_defaults", {}),
             )
             self.bundle = load_workspace_bundle(config_path)
         except Exception as exc:

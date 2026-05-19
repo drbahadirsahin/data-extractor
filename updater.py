@@ -225,6 +225,7 @@ def stage_update_and_restart(archive_path: Path) -> None:
     executable = current_executable()
     if os.name == "nt":
         script_path = archive_path.parent / "apply_update.ps1"
+        launcher_path = archive_path.parent / "apply_update.cmd"
         script_path.write_text(
             build_windows_apply_update_script(
                 archive_path=archive_path,
@@ -234,31 +235,41 @@ def stage_update_and_restart(archive_path: Path) -> None:
             ),
             encoding="utf-8",
         )
+        launcher_path.write_text(
+            build_windows_update_launcher_script(
+                script_path=script_path,
+                app_root=app_root,
+            ),
+            encoding="utf-8",
+        )
+        stage_log = write_windows_stage_log(
+            app_root=app_root,
+            archive_path=archive_path,
+            script_path=script_path,
+            launcher_path=launcher_path,
+        )
         startupinfo = subprocess.STARTUPINFO()
         startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-        startupinfo.wShowWindow = 0
+        startupinfo.wShowWindow = 7
         creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(
             subprocess, "DETACHED_PROCESS", 0
         )
-        subprocess.Popen(
-            [
-                "powershell.exe",
-                "-NoProfile",
-                "-ExecutionPolicy",
-                "Bypass",
-                "-WindowStyle",
-                "Hidden",
-                "-File",
-                str(script_path),
-            ],
-            close_fds=True,
-            cwd=tempfile.gettempdir(),
-            creationflags=creationflags,
-            startupinfo=startupinfo,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
+        launcher_command = f'start "" /min cmd.exe /d /c "{launcher_path}"'
+        try:
+            process = subprocess.Popen(
+                ["cmd.exe", "/d", "/c", launcher_command],
+                close_fds=True,
+                cwd=tempfile.gettempdir(),
+                creationflags=creationflags,
+                startupinfo=startupinfo,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        except Exception as exc:
+            append_update_log(stage_log, f"Launcher process failed to start: {exc}")
+            raise
+        append_update_log(stage_log, f"Launcher process started with pid={process.pid}")
         return
 
     script_path = archive_path.parent / "apply_update.sh"
@@ -274,6 +285,34 @@ def stage_update_and_restart(archive_path: Path) -> None:
     script_path.chmod(0o700)
     logging.info("Starting update apply script: %s", script_path)
     subprocess.Popen(["/bin/sh", str(script_path)], close_fds=True)
+
+
+def write_windows_stage_log(
+    *,
+    app_root: Path,
+    archive_path: Path,
+    script_path: Path,
+    launcher_path: Path,
+) -> Path:
+    data_dir = app_root / ".llm_extractor_data"
+    data_dir.mkdir(parents=True, exist_ok=True)
+    log_path = data_dir / "update_stage.log"
+    append_update_log(log_path, "Staging Windows update helper")
+    append_update_log(log_path, f"APP_ROOT={app_root}")
+    append_update_log(log_path, f"ARCHIVE={archive_path}")
+    append_update_log(log_path, f"PS_SCRIPT={script_path}")
+    append_update_log(log_path, f"CMD_LAUNCHER={launcher_path}")
+    return log_path
+
+
+def append_update_log(log_path: Path, message: str) -> None:
+    try:
+        timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        with log_path.open("a", encoding="utf-8") as handle:
+            handle.write(f"{timestamp} {message}\n")
+    except OSError:
+        logging.exception("Could not write update log: %s", log_path)
 
 
 def validate_self_update_target() -> None:
@@ -441,6 +480,30 @@ def build_posix_apply_update_script(*, archive_path: Path, app_root: Path, execu
           nohup "$EXECUTABLE" >/dev/null 2>&1 &
         fi
         echo "Update apply finished at $(date)"
+        """
+    ).strip()
+
+
+def build_windows_update_launcher_script(*, script_path: Path, app_root: Path) -> str:
+    return textwrap.dedent(
+        f"""
+        @echo off
+        setlocal
+        set "APP_ROOT={str(app_root)}"
+        set "PS_SCRIPT={str(script_path)}"
+        set "DATA_DIR=%APP_ROOT%\\.llm_extractor_data"
+        if not exist "%DATA_DIR%" mkdir "%DATA_DIR%" >nul 2>nul
+        set "LOG=%DATA_DIR%\\apply_update_launcher.log"
+        echo %DATE% %TIME% Starting Windows update launcher>> "%LOG%"
+        echo APP_ROOT=%APP_ROOT%>> "%LOG%"
+        echo PS_SCRIPT=%PS_SCRIPT%>> "%LOG%"
+        set "PS_EXE=%SystemRoot%\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"
+        if not exist "%PS_EXE%" set "PS_EXE=powershell.exe"
+        echo PS_EXE=%PS_EXE%>> "%LOG%"
+        "%PS_EXE%" -NoProfile -ExecutionPolicy Bypass -File "%PS_SCRIPT%" >> "%LOG%" 2>&1
+        set "EXIT_CODE=%ERRORLEVEL%"
+        echo %DATE% %TIME% PowerShell exited with %EXIT_CODE%>> "%LOG%"
+        exit /b %EXIT_CODE%
         """
     ).strip()
 

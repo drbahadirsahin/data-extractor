@@ -9,6 +9,7 @@ from unittest.mock import patch
 from workspace_flow import (
     build_scoped_project_config,
     default_search_roots,
+    ensure_project_defaults_in_config,
     ensure_server_metadata_in_config,
     ensure_project_config,
     find_project_config_by_project_id,
@@ -330,6 +331,110 @@ class WorkspaceFlowTests(unittest.TestCase):
             self.assertEqual(payload["llm"]["provider"], "openai_compatible")
             self.assertEqual(payload["llm"]["model"], "model-x")
             self.assertTrue((config_path.parent / "dictionary.csv").exists())
+
+    def test_ensure_project_config_applies_developer_project_defaults(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            app_home = root / ".app"
+            app_home.mkdir()
+
+            with (
+                patch("workspace_flow.RedcapClient.export_metadata_csv", return_value="field_name,form_name,field_type,field_label\nhasta_ad,hasta_bilgileri,text,Hasta Adı\n"),
+                patch("workspace_flow.RedcapClient.export_instruments", return_value={}),
+                patch("workspace_flow.RedcapClient.export_repeating_forms", return_value=[]),
+            ):
+                config_path = ensure_project_config(
+                    app_home=app_home,
+                    project_id="17",
+                    project_name="Defaults",
+                    api_url="https://redcap.example/api/",
+                    api_token="secret",
+                    default_llm_settings={
+                        "provider": "llm_gateway",
+                        "base_url": "https://gateway.example/v1",
+                        "model": "qwen/qwen3.5-9b",
+                        "timeout_seconds": 600,
+                    },
+                    project_defaults={
+                        "projects": {
+                            "17": {
+                                "field_overrides": {
+                                    "hasta_ad": {
+                                        "post_processing": [["limit_output_length", 2]],
+                                        "max_candidates": 3,
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    search_roots=[root / "missing"],
+                )
+
+            payload = json.loads(config_path.read_text(encoding="utf-8"))
+            self.assertEqual(payload["llm"]["timeout_seconds"], 600)
+            self.assertEqual(
+                payload["field_overrides"]["hasta_ad"]["post_processing"],
+                [["limit_output_length", 2]],
+            )
+            self.assertEqual(payload["field_overrides"]["hasta_ad"]["max_candidates"], 3)
+
+    def test_ensure_project_defaults_updates_existing_managed_llm_without_clobbering_override(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            config_path = root / "project_config_17.json"
+            config_path.write_text(
+                json.dumps(
+                    {
+                        "project_name": "Existing",
+                        "project_id": "17",
+                        "dictionary_path": "dictionary.csv",
+                        "target_forms": [],
+                        "target_fields": [],
+                        "llm": {"provider": "llm_gateway", "timeout_seconds": 120},
+                        "dictionary_legend": {},
+                        "prompting": {},
+                        "batch_size": 5,
+                        "append_fields": [],
+                        "field_overrides": {
+                            "hasta_ad": {"prompt_append": "Mevcut kural korunur."}
+                        },
+                        "form_overrides": {},
+                        "repeating_forms": [],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            ensure_project_defaults_in_config(
+                config_path,
+                project_id="17",
+                default_llm_settings={
+                    "provider": "llm_gateway",
+                    "base_url": "https://gateway.example/v1",
+                    "model": "qwen/qwen3.5-9b",
+                    "timeout_seconds": 600,
+                },
+                project_defaults={
+                    "projects": {
+                        "17": {
+                            "field_overrides": {
+                                "hasta_ad": {
+                                    "post_processing": [["limit_output_length", 2]],
+                                    "max_candidates": 3,
+                                }
+                            }
+                        }
+                    }
+                },
+            )
+
+            payload = json.loads(config_path.read_text(encoding="utf-8"))
+            self.assertEqual(payload["llm"]["timeout_seconds"], 600)
+            self.assertEqual(payload["field_overrides"]["hasta_ad"]["prompt_append"], "Mevcut kural korunur.")
+            self.assertEqual(
+                payload["field_overrides"]["hasta_ad"]["post_processing"],
+                [["limit_output_length", 2]],
+            )
 
     def test_ensure_server_metadata_in_config_updates_form_labels_and_repeating_forms(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -39,7 +39,7 @@ def launch_gui(argv: list[str] | None = None) -> int:
 
         app.setStyleSheet(CLINICAL_STYLE)
         window = ClinicalMainWindow(runtime)
-    window.show()
+    show_main_window(window)
     activate_window(window)
     app.processEvents()
     QTimer.singleShot(250, lambda: activate_window(window))
@@ -82,6 +82,11 @@ def normalize_ui_mode(value: str) -> str:
     return "clinical"
 
 
+def show_main_window(window) -> None:
+    target = getattr(window, "_window", window)
+    target.showMaximized()
+
+
 def activate_window(window) -> None:
     target = getattr(window, "_window", window)
     try:
@@ -92,15 +97,16 @@ def activate_window(window) -> None:
         target.setWindowState(
             target.windowState()
             & ~Qt.WindowState.WindowMinimized
-            & ~Qt.WindowState.WindowMaximized
             & ~Qt.WindowState.WindowFullScreen
         )
-        target.showNormal()
+        if not target.isMaximized():
+            target.showMaximized()
         if screen is not None:
-            available = screen.availableGeometry()
-            constrain_window_to_screen(target, available)
-            QApplication.processEvents()
-            place_window_within_screen(target, available)
+            if not target.isMaximized():
+                available = screen.availableGeometry()
+                constrain_window_to_screen(target, available)
+                QApplication.processEvents()
+                place_window_within_screen(target, available)
         target.setWindowState(
             (target.windowState() & ~Qt.WindowState.WindowMinimized)
             | Qt.WindowState.WindowActive

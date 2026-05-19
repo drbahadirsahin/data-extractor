@@ -79,12 +79,19 @@ def ensure_project_config(
     api_url: str,
     api_token: str,
     default_llm_settings: dict[str, Any] | None = None,
+    project_defaults: dict[str, Any] | None = None,
     search_roots: list[str | Path] | None = None,
 ) -> Path:
     for root in search_roots or default_search_roots(app_home):
         match = find_project_config_by_project_id(project_id, Path(root))
         if match is not None:
             ensure_server_metadata_in_config(match, api_url=api_url, api_token=api_token)
+            ensure_project_defaults_in_config(
+                match,
+                project_id=project_id,
+                default_llm_settings=default_llm_settings,
+                project_defaults=project_defaults,
+            )
             return match
 
     managed_dir = Path(app_home).expanduser().resolve() / "projects" / project_id
@@ -128,11 +135,116 @@ def ensure_project_config(
     blank_config["form_overrides"] = {}
     blank_config["target_forms"] = []
     blank_config["target_fields"] = []
+    apply_project_defaults_to_payload(blank_config, project_id=project_id, project_defaults=project_defaults)
     config_path.write_text(
         json.dumps(blank_config, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
     return config_path
+
+
+def ensure_project_defaults_in_config(
+    config_path: Path,
+    *,
+    project_id: str,
+    default_llm_settings: dict[str, Any] | None = None,
+    project_defaults: dict[str, Any] | None = None,
+) -> None:
+    try:
+        payload = load_project_config_payload(config_path)
+    except Exception:
+        return
+    if not payload:
+        return
+    changed = False
+    if sync_managed_llm_settings(payload, default_llm_settings):
+        changed = True
+    if apply_project_defaults_to_payload(payload, project_id=project_id, project_defaults=project_defaults):
+        changed = True
+    if changed:
+        config_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def sync_managed_llm_settings(payload: dict[str, Any], default_llm_settings: dict[str, Any] | None) -> bool:
+    if not default_llm_settings:
+        return False
+    provider = str(default_llm_settings.get("provider") or "").strip().lower()
+    if provider not in {"llm_gateway", "managed_gateway"}:
+        if payload.get("llm"):
+            return False
+        payload["llm"] = dict(default_llm_settings)
+        return True
+    desired = dict(default_llm_settings)
+    if payload.get("llm") == desired:
+        return False
+    payload["llm"] = desired
+    return True
+
+
+def apply_project_defaults_to_payload(
+    payload: dict[str, Any],
+    *,
+    project_id: str,
+    project_defaults: dict[str, Any] | None,
+) -> bool:
+    defaults = defaults_for_project(project_defaults, project_id)
+    if not defaults:
+        return False
+    changed = False
+    for key in ("field_overrides", "form_overrides"):
+        default_values = defaults.get(key)
+        if not isinstance(default_values, dict) or not default_values:
+            continue
+        existing_values = payload.get(key)
+        if not isinstance(existing_values, dict):
+            existing_values = {}
+        merged = merge_nested_defaults(default_values, existing_values)
+        if payload.get(key) != merged:
+            payload[key] = merged
+            changed = True
+    for key in ("prompting",):
+        default_values = defaults.get(key)
+        if not isinstance(default_values, dict) or not default_values:
+            continue
+        existing_values = payload.get(key)
+        if not isinstance(existing_values, dict):
+            existing_values = {}
+        merged = merge_nested_defaults(default_values, existing_values)
+        if payload.get(key) != merged:
+            payload[key] = merged
+            changed = True
+    for key in ("batch_size",):
+        if key in defaults and key not in payload:
+            payload[key] = defaults[key]
+            changed = True
+    return changed
+
+
+def defaults_for_project(project_defaults: dict[str, Any] | None, project_id: str) -> dict[str, Any]:
+    if not isinstance(project_defaults, dict):
+        return {}
+    merged: dict[str, Any] = {}
+    global_defaults = project_defaults.get("global")
+    if isinstance(global_defaults, dict):
+        merged = merge_nested_defaults(global_defaults, merged)
+    projects = project_defaults.get("projects")
+    if isinstance(projects, dict):
+        for key in (str(project_id), int(project_id) if str(project_id).isdigit() else str(project_id)):
+            project_specific = projects.get(key)
+            if isinstance(project_specific, dict):
+                merged = merge_nested_defaults(project_specific, merged)
+                break
+    return merged
+
+
+def merge_nested_defaults(defaults: dict[str, Any], existing: dict[str, Any]) -> dict[str, Any]:
+    merged = dict(defaults)
+    for key, value in existing.items():
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key] = merge_nested_defaults(merged[key], value)
+        else:
+            merged[key] = value
+    return merged
 
 
 def save_workspace_bundle(bundle: WorkspaceBundle) -> None:

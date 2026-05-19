@@ -10,6 +10,7 @@ from updater import (
     UpdateError,
     build_posix_apply_update_script,
     build_windows_apply_update_script,
+    build_windows_update_launcher_script,
     cache_busted_url,
     is_macos_app_translocated,
     macos_needs_portable_repair,
@@ -63,6 +64,8 @@ class ReleaseProfileUpdaterTests(unittest.TestCase):
         self.assertTrue(version_is_newer("0.1.1-early.10", "0.1.1-early.9"))
         self.assertTrue(version_is_newer("0.1.1-early.11", "0.1.1-early.10"))
         self.assertTrue(version_is_newer("0.1.1-early.12", "0.1.1-early.11"))
+        self.assertTrue(version_is_newer("0.1.1-early.13", "0.1.1-early.12"))
+        self.assertTrue(version_is_newer("0.1.1-early.14", "0.1.1-early.13"))
 
     def test_cache_busted_url_preserves_existing_query(self):
         with patch("updater.time.time", return_value=1234.567):
@@ -244,6 +247,17 @@ class ReleaseProfileUpdaterTests(unittest.TestCase):
         self.assertIn("Copy-Item -LiteralPath $PreservedDataDir -Destination $NewDataDir", script)
         self.assertIn("Start-Process -FilePath $NewExecutable -WorkingDirectory $AppRoot", script)
         self.assertIn("Restored backup after failed update", script)
+
+    def test_windows_update_launcher_writes_persistent_diagnostics(self):
+        script = build_windows_update_launcher_script(
+            script_path=Path("C:/Temp/apply_update.ps1"),
+            app_root=Path("C:/fld/LLMExtractor-0.1.1-early.14-windows-x64"),
+        )
+
+        self.assertIn("apply_update_launcher.log", script)
+        self.assertIn("WindowsPowerShell\\v1.0\\powershell.exe", script)
+        self.assertIn("-ExecutionPolicy Bypass -File", script)
+        self.assertIn("PowerShell exited with", script)
 
     def test_frozen_app_home_defaults_next_to_executable(self):
         with tempfile.TemporaryDirectory() as temp_dir:

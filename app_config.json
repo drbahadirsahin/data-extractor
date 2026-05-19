@@ -1,6 +1,6 @@
 {
   "release": {
-    "version": "0.1.1-early.13",
+    "version": "0.1.1-early.14",
     "profile": "user",
     "channel": "early",
     "updates": {
@@ -30,7 +30,7 @@
     "model": "qwen/qwen3.5-9b",
     "temperature": 0,
     "max_tokens": 8192,
-    "timeout_seconds": 120,
+    "timeout_seconds": 600,
     "gateway_client_token_secret_name": "llm_gateway_client_token",
     "use_json_schema": true
   },
@@ -49,6 +49,21 @@
   },
   "ui": {
     "mode": "clinical"
+  },
+  "project_defaults": {
+    "global": {
+      "field_overrides": {}
+    },
+    "projects": {
+      "17": {
+        "field_overrides": {
+          "hasta_ad": {
+            "post_processing": [["limit_output_length", 2]],
+            "max_candidates": 3
+          }
+        }
+      }
+    }
   },
   "extractable_types": [
     "text",

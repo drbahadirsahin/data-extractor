@@ -55,6 +55,7 @@ class ClinicalMainWindow:
     def __init__(self, runtime: RuntimeContext) -> None:
         from PySide6.QtCore import Qt
         from PySide6.QtWidgets import (
+            QComboBox,
             QFrame,
             QHBoxLayout,
             QLabel,
@@ -71,6 +72,7 @@ class ClinicalMainWindow:
         self.runtime = runtime
         self.language = runtime.settings.ui.language
         self.show_advanced_ui = show_advanced_ui(runtime.app_config)
+        self._updating_connection_combo = False
         self._window = QMainWindow()
         self._window.setObjectName("ClinicalMainWindow")
         self._window.setWindowTitle(tr("app_title", self.language))
@@ -100,9 +102,12 @@ class ClinicalMainWindow:
         subtitle.setWordWrap(True)
         sidebar_layout.addWidget(subtitle)
 
-        self.connection_badge = QLabel("")
-        self.connection_badge.setObjectName("WarningPill")
-        sidebar_layout.addWidget(self.connection_badge)
+        self.connection_project_combo = QComboBox()
+        self.connection_project_combo.setObjectName("SidebarProjectCombo")
+        self.connection_project_combo.setMinimumContentsLength(24)
+        self.connection_project_combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        self.connection_project_combo.currentIndexChanged.connect(self.select_sidebar_project)
+        sidebar_layout.addWidget(self.connection_project_combo)
         sidebar_layout.addSpacing(12)
 
         self.stack = QStackedWidget()
@@ -180,18 +185,59 @@ class ClinicalMainWindow:
         return scroll
 
     def refresh_connection_state(self) -> None:
-        project_name = self.runtime.settings.redcap.selected_project_name
-        connected = bool(project_name and self.runtime.settings.redcap.selected_project_token_secret_name)
-        if connected:
-            self.connection_badge.setObjectName("StatusPill")
-            self.connection_badge.setText(tr("clinical_connected_project", self.language, project=project_name))
-        else:
-            self.connection_badge.setObjectName("WarningPill")
-            self.connection_badge.setText(tr("clinical_not_connected", self.language))
-        self.connection_badge.style().unpolish(self.connection_badge)
-        self.connection_badge.style().polish(self.connection_badge)
+        self.populate_connection_project_combo()
         self.home_page.refresh()
         self.import_page.refresh()
+
+    def populate_connection_project_combo(self) -> None:
+        current_project_id = self.runtime.settings.redcap.selected_project_id
+        projects = list(self.runtime.settings.redcap.saved_project_tokens)
+        self._updating_connection_combo = True
+        self.connection_project_combo.blockSignals(True)
+        self.connection_project_combo.clear()
+        if not projects:
+            self.connection_project_combo.addItem(tr("clinical_not_connected", self.language), "")
+            self.connection_project_combo.setEnabled(False)
+            self.connection_project_combo.setToolTip(tr("clinical_not_connected", self.language))
+        else:
+            self.connection_project_combo.setEnabled(True)
+            for project in projects:
+                self.connection_project_combo.addItem(
+                    tr("clinical_connected_project", self.language, project=project.project_name),
+                    project.project_id,
+                )
+            if current_project_id:
+                index = self.connection_project_combo.findData(current_project_id)
+                if index >= 0:
+                    self.connection_project_combo.setCurrentIndex(index)
+            selected = self.connection_project_combo.currentText()
+            self.connection_project_combo.setToolTip(selected)
+            view = self.connection_project_combo.view()
+            if view is not None:
+                view.setMinimumWidth(360)
+        self.connection_project_combo.blockSignals(False)
+        self._updating_connection_combo = False
+
+    def select_sidebar_project(self) -> None:
+        if self._updating_connection_combo:
+            return
+        project_id = self.connection_project_combo.currentData()
+        if not project_id:
+            return
+        for project in self.runtime.settings.redcap.saved_project_tokens:
+            if project.project_id != str(project_id):
+                continue
+            settings = self.runtime.settings
+            settings.redcap.api_url = project.api_url
+            settings.redcap.selected_project_id = project.project_id
+            settings.redcap.selected_project_name = project.project_name
+            settings.redcap.selected_project_token_secret_name = project.token_secret_name
+            self.runtime.settings_store.save(settings)
+            self.workspace_page.refresh_redcap_projects()
+            self.populate_connection_project_combo()
+            self.home_page.refresh()
+            self.import_page.refresh()
+            return
 
     def after_redcap_saved(self) -> None:
         self.workspace_page.refresh_redcap_projects()
@@ -708,6 +754,7 @@ class ClinicalRedcapPage:
                 api_url=api_url,
                 api_token=token,
                 default_llm_settings=build_default_llm_settings(self.runtime),
+                project_defaults=self.runtime.app_config.get("project_defaults", {}),
             )
         except Exception as exc:
             QMessageBox.warning(

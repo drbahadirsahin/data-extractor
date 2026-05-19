@@ -71,6 +71,10 @@ export default {
 };
 
 function validateClientAuth(request, env) {
+  const requireClientToken = String(env.REQUIRE_CLIENT_TOKEN ?? "true").trim().toLowerCase();
+  if (["0", "false", "no", "off"].includes(requireClientToken)) {
+    return null;
+  }
   const requiredToken = String(env.CLIENT_TOKEN || "").trim();
   if (!requiredToken) {
     return null;

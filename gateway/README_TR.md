@@ -34,7 +34,7 @@ cd gateway
 npx --yes wrangler@latest login
 ```
 
-`wrangler.toml` public repoya girebilir; içinde secret yoktur. Gerekirse `name`, `DEFAULT_MODEL`, `MAX_TOKENS` ve `DEFAULT_REASONING_EFFORT` değerlerini düzenleyin. Qwen modellerinde gereksiz düşünme çıktısını ve maliyeti azaltmak için varsayılan reasoning ayarı `none` olarak tutulur.
+`wrangler.toml` public repoya girebilir; içinde secret yoktur. Gerekirse `name`, `DEFAULT_MODEL`, `MAX_TOKENS`, `DEFAULT_REASONING_EFFORT` ve `REQUIRE_CLIENT_TOKEN` değerlerini düzenleyin. Qwen modellerinde gereksiz düşünme çıktısını ve maliyeti azaltmak için varsayılan reasoning ayarı `none` olarak tutulur.
 
 Secret değerlerini dosyaya yazmayın. Bunları Cloudflare secret olarak kaydedin:
 
@@ -44,6 +44,8 @@ npx --yes wrangler@latest secret put CLIENT_TOKEN
 ```
 
 `CLIENT_TOKEN` erken test için basit gateway erişim kontrolüdür. Final mimaride bunun yerine kullanıcı/proje bazlı aktivasyon ve merkezi rate limit mekanizması tercih edilmelidir. Bu token OpenRouter key değildir; sızsa bile OpenRouter secret'ı açığa çıkmaz, ancak gateway kullanımını kötüye kullanmaya izin verebilir.
+
+`REQUIRE_CLIENT_TOKEN=false` erken uçtan uca testte son kullanıcının token girmeden gateway'i denemesi içindir. Public kullanımda bu ayar açık bırakılmamalı; rate limit ve aktivasyon eklendiğinde tekrar `true` yapılmalıdır.
 
 Deploy:
 

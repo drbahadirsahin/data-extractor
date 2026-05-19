@@ -57,7 +57,8 @@ class LlmProviderTests(unittest.TestCase):
         self.assertIsInstance(provider, OpenAICompatibleProvider)
 
     def test_gateway_provider_does_not_require_api_key(self) -> None:
-        self.assertEqual(build_auth_headers({"provider": "llm_gateway"}), {})
+        with patch("llm_provider.resolve_api_key_from_secret_store", return_value=None):
+            self.assertEqual(build_auth_headers({"provider": "llm_gateway"}), {})
 
     def test_gateway_provider_uses_optional_client_token(self) -> None:
         self.assertEqual(
@@ -151,7 +152,10 @@ class LlmProviderTests(unittest.TestCase):
                 }
             ]
         }
-        with patch("llm_provider.post_json", return_value=success_response) as mock_post:
+        with (
+            patch("llm_provider.resolve_api_key_from_secret_store", return_value=None),
+            patch("llm_provider.post_json", return_value=success_response) as mock_post,
+        ):
             response = provider.generate(
                 messages=[{"role": "user", "content": "test"}],
                 schema={"type": "object"},

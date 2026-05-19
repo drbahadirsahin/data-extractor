@@ -9,6 +9,7 @@ from settings_store import PORTABLE_DIRNAME, PORTABLE_MARKER, resolve_app_home
 from updater import (
     UpdateError,
     build_posix_apply_update_script,
+    build_windows_apply_update_script,
     cache_busted_url,
     is_macos_app_translocated,
     macos_needs_portable_repair,
@@ -58,6 +59,7 @@ class ReleaseProfileUpdaterTests(unittest.TestCase):
         self.assertTrue(version_is_newer("0.1.1-early.3", "0.1.1-early.2"))
         self.assertTrue(version_is_newer("0.1.1-early.4", "0.1.1-early.3"))
         self.assertTrue(version_is_newer("0.1.1-early.5", "0.1.1-early.4"))
+        self.assertTrue(version_is_newer("0.1.1-early.6", "0.1.1-early.5"))
 
     def test_cache_busted_url_preserves_existing_query(self):
         with patch("updater.time.time", return_value=1234.567):
@@ -223,6 +225,20 @@ class ReleaseProfileUpdaterTests(unittest.TestCase):
         self.assertIn("APP_ROOT=", script)
         self.assertIn('open -n "$APP_BUNDLE"', script)
         self.assertIn("nohup \"$NEW_EXECUTABLE\"", script)
+
+    def test_windows_apply_update_installs_to_sibling_version_folder(self):
+        script = build_windows_apply_update_script(
+            archive_path=Path("C:/Temp/update.zip"),
+            app_root=Path("C:/fld/LLMExtractor-0.1.1-early.5-windows-x64"),
+            executable=Path("C:/fld/LLMExtractor-0.1.1-early.5-windows-x64/LLMExtractor.exe"),
+            parent_pid=123,
+        )
+
+        self.assertIn("$InstallRoot = Join-Path $ParentRoot", script)
+        self.assertIn("Move-Item -LiteralPath $SourceRoot -Destination $InstallRoot", script)
+        self.assertIn("Copy-Item -LiteralPath $OldDataDir -Destination $NewDataDir", script)
+        self.assertIn("Start-Process -FilePath $NewExecutable", script)
+        self.assertNotIn("Rename-Item -LiteralPath $AppRoot", script)
 
     def test_frozen_app_home_defaults_next_to_executable(self):
         with tempfile.TemporaryDirectory() as temp_dir:

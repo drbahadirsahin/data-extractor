@@ -234,16 +234,30 @@ def stage_update_and_restart(archive_path: Path) -> None:
             ),
             encoding="utf-8",
         )
+        startupinfo = subprocess.STARTUPINFO()
+        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        startupinfo.wShowWindow = 0
+        creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(
+            subprocess, "DETACHED_PROCESS", 0
+        )
         subprocess.Popen(
             [
-                "powershell",
+                "powershell.exe",
                 "-NoProfile",
                 "-ExecutionPolicy",
                 "Bypass",
+                "-WindowStyle",
+                "Hidden",
                 "-File",
                 str(script_path),
             ],
             close_fds=True,
+            cwd=tempfile.gettempdir(),
+            creationflags=creationflags,
+            startupinfo=startupinfo,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
         )
         return
 
@@ -439,15 +453,44 @@ def build_windows_apply_update_script(*, archive_path: Path, app_root: Path, exe
         $AppRoot = {str(app_root)!r}
         $Executable = {str(executable)!r}
         $ParentPid = {int(parent_pid)}
+        $Log = Join-Path (Split-Path -Parent $Archive) "apply_update.log"
 
-        for ($i = 0; $i -lt 120; $i++) {{
+        function Write-UpdateLog($Message) {{
+            $stamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+            Add-Content -LiteralPath $Log -Value "$stamp $Message"
+        }}
+
+        function Invoke-WithRetry($Description, [scriptblock]$Action, [int]$Attempts = 120) {{
+            for ($i = 0; $i -lt $Attempts; $i++) {{
+                try {{
+                    & $Action
+                    Write-UpdateLog "$Description succeeded"
+                    return
+                }} catch {{
+                    Write-UpdateLog "$Description failed on attempt $($i + 1): $($_.Exception.Message)"
+                    Start-Sleep -Milliseconds 500
+                }}
+            }}
+            throw "$Description failed after $Attempts attempts"
+        }}
+
+        Write-UpdateLog "Starting update apply"
+        Write-UpdateLog "APP_ROOT=$AppRoot"
+        Write-UpdateLog "EXECUTABLE=$Executable"
+        Write-UpdateLog "ARCHIVE=$Archive"
+        Set-Location -LiteralPath ([System.IO.Path]::GetTempPath())
+
+        for ($i = 0; $i -lt 240; $i++) {{
             $process = Get-Process -Id $ParentPid -ErrorAction SilentlyContinue
             if ($null -eq $process) {{ break }}
             Start-Sleep -Milliseconds 500
         }}
+        Write-UpdateLog "Parent wait finished"
+        Start-Sleep -Milliseconds 1000
 
         $ExtractDir = Join-Path ([System.IO.Path]::GetTempPath()) ([System.Guid]::NewGuid().ToString())
         New-Item -ItemType Directory -Path $ExtractDir | Out-Null
+        Write-UpdateLog "Extracting to $ExtractDir"
         Expand-Archive -LiteralPath $Archive -DestinationPath $ExtractDir -Force
         $Children = Get-ChildItem -LiteralPath $ExtractDir | Where-Object {{ $_.Name -ne "__MACOSX" }}
         if ($Children.Count -eq 1) {{
@@ -455,32 +498,50 @@ def build_windows_apply_update_script(*, archive_path: Path, app_root: Path, exe
         }} else {{
             $SourceRoot = $ExtractDir
         }}
+        Write-UpdateLog "SOURCE_ROOT=$SourceRoot"
 
-        $PreserveRoot = Join-Path ([System.IO.Path]::GetTempPath()) ([System.Guid]::NewGuid().ToString())
-        New-Item -ItemType Directory -Path $PreserveRoot | Out-Null
-        $DataDir = Join-Path $AppRoot ".llm_extractor_data"
-        $PreservedData = Join-Path $PreserveRoot ".llm_extractor_data"
-        if (Test-Path -LiteralPath $DataDir) {{
-            Move-Item -LiteralPath $DataDir -Destination $PreservedData
+        $ParentRoot = Split-Path -Parent $AppRoot
+        $InstallRoot = Join-Path $ParentRoot (Split-Path -Leaf $SourceRoot)
+        Write-UpdateLog "INSTALL_ROOT=$InstallRoot"
+
+        if (Test-Path -LiteralPath $InstallRoot) {{
+            Invoke-WithRetry "Remove previous target" {{
+                Remove-Item -LiteralPath $InstallRoot -Recurse -Force
+            }}
+        }}
+        Invoke-WithRetry "Install new version" {{
+            Move-Item -LiteralPath $SourceRoot -Destination $InstallRoot
         }}
 
-        $BackupRoot = "$AppRoot.old"
-        if (Test-Path -LiteralPath $BackupRoot) {{
-            Remove-Item -LiteralPath $BackupRoot -Recurse -Force
+        $OldDataDir = Join-Path $AppRoot ".llm_extractor_data"
+        $NewDataDir = Join-Path $InstallRoot ".llm_extractor_data"
+        if (Test-Path -LiteralPath $OldDataDir) {{
+            if (Test-Path -LiteralPath $NewDataDir) {{
+                Invoke-WithRetry "Remove packaged data dir" {{
+                    Remove-Item -LiteralPath $NewDataDir -Recurse -Force
+                }}
+            }}
+            Invoke-WithRetry "Copy portable data" {{
+                Copy-Item -LiteralPath $OldDataDir -Destination $NewDataDir -Recurse -Force
+            }}
         }}
-        if (Test-Path -LiteralPath $AppRoot) {{
-            Rename-Item -LiteralPath $AppRoot -NewName ([System.IO.Path]::GetFileName($BackupRoot))
+
+        $ExecutableName = Split-Path -Leaf $Executable
+        $NewExecutable = Join-Path $InstallRoot $ExecutableName
+        if (-not (Test-Path -LiteralPath $NewExecutable)) {{
+            $Candidate = Get-ChildItem -LiteralPath $InstallRoot -Filter "*.exe" | Select-Object -First 1
+            if ($null -ne $Candidate) {{
+                $NewExecutable = $Candidate.FullName
+            }}
         }}
-        Move-Item -LiteralPath $SourceRoot -Destination $AppRoot
-        if ((Test-Path -LiteralPath $PreservedData) -and -not (Test-Path -LiteralPath $DataDir)) {{
-            Move-Item -LiteralPath $PreservedData -Destination $DataDir
+        if (Test-Path -LiteralPath $NewExecutable) {{
+            Write-UpdateLog "Starting $NewExecutable"
+            Start-Process -FilePath $NewExecutable -WorkingDirectory $InstallRoot
+        }} else {{
+            Write-UpdateLog "New executable not found"
+            throw "Updated executable not found."
         }}
-        if (Test-Path -LiteralPath $BackupRoot) {{
-            Remove-Item -LiteralPath $BackupRoot -Recurse -Force
-        }}
-        if (Test-Path -LiteralPath $Executable) {{
-            Start-Process -FilePath $Executable
-        }}
+        Write-UpdateLog "Update apply finished"
         """
     ).strip()
 

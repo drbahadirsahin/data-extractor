@@ -57,11 +57,8 @@ def run_startup_update_check(app, runtime: Any) -> bool:
         progress.setLabelText(tr("update_installing", language))
         app.processEvents()
         stage_update_and_restart(archive_path)
-        QMessageBox.information(
-            None,
-            tr("update_title", language),
-            tr("update_restart_now", language),
-        )
+        progress.setLabelText(tr("update_restart_now", language))
+        app.processEvents()
         app.quit()
         return True
     except Exception as exc:
@@ -181,7 +178,7 @@ def run_startup_update_check_async(app, runtime: Any) -> bool:
                 progress.setRange(0, 0)
 
         def _on_archive_ready(self, archive_path: str, _version: str) -> None:
-            from PySide6.QtWidgets import QMessageBox
+            from PySide6.QtCore import QTimer
 
             progress = self._ensure_progress()
             progress.setLabelText(tr("update_installing", self._language))
@@ -190,12 +187,9 @@ def run_startup_update_check_async(app, runtime: Any) -> bool:
             except Exception as exc:
                 self._on_failed(str(exc))
                 return
-            QMessageBox.information(
-                None,
-                tr("update_title", self._language),
-                tr("update_restart_now", self._language),
-            )
-            app.quit()
+            progress.setLabelText(tr("update_restart_now", self._language))
+            logging.info("Update staged; application will quit for restart")
+            QTimer.singleShot(700, app.quit)
 
         def _on_no_update(self) -> None:
             logging.info("No startup update available")

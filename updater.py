@@ -30,10 +30,19 @@ def check_for_update(app_config: dict[str, Any]) -> dict[str, Any] | None:
     manifest = fetch_json(manifest_url, timeout_seconds=int(settings.get("timeout_seconds", 8)))
     current = app_version(app_config)
     latest = str(manifest.get("version") or "").strip()
-    if not latest or not version_is_newer(latest, current):
+    newer = bool(latest and version_is_newer(latest, current))
+    logging.info(
+        "Update manifest checked: current=%s latest=%s newer=%s platform_keys=%s",
+        current,
+        latest or "<missing>",
+        newer,
+        ",".join(platform_keys()),
+    )
+    if not newer:
         return None
     platform_payload = platform_update_payload(manifest)
     if not platform_payload:
+        logging.warning("Update manifest has no payload for platform keys: %s", platform_keys())
         return None
     return {
         "version": latest,

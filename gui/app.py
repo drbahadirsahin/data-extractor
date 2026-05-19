@@ -89,16 +89,25 @@ def activate_window(window) -> None:
         from PySide6.QtWidgets import QApplication
 
         screen = QApplication.primaryScreen()
+        target.showNormal()
         if screen is not None:
             available = screen.availableGeometry()
+            constrain_window_to_screen(target, available)
             frame = target.frameGeometry()
             frame.moveCenter(available.center())
+            if frame.left() < available.left():
+                frame.moveLeft(available.left())
+            if frame.top() < available.top():
+                frame.moveTop(available.top())
+            if frame.right() > available.right():
+                frame.moveRight(available.right())
+            if frame.bottom() > available.bottom():
+                frame.moveBottom(available.bottom())
             target.move(frame.topLeft())
         target.setWindowState(
             (target.windowState() & ~Qt.WindowState.WindowMinimized)
             | Qt.WindowState.WindowActive
         )
-        target.showNormal()
         target.raise_()
         target.activateWindow()
         geometry = target.geometry()
@@ -113,6 +122,23 @@ def activate_window(window) -> None:
         )
     except RuntimeError:
         logging.exception("Could not activate main window")
+
+
+def constrain_window_to_screen(target, available_geometry) -> None:
+    margin = 32
+    max_width = max(640, available_geometry.width() - margin)
+    max_height = max(520, available_geometry.height() - margin)
+    width = min(target.width(), max_width)
+    height = min(target.height(), max_height)
+    if width != target.width() or height != target.height():
+        target.resize(width, height)
+        logging.info(
+            "Window resized to fit screen: %sx%s available=%sx%s",
+            width,
+            height,
+            available_geometry.width(),
+            available_geometry.height(),
+        )
 
 
 def run_deferred_update_check(app, runtime) -> None:

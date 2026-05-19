@@ -50,6 +50,7 @@ class ReleaseProfileUpdaterTests(unittest.TestCase):
         self.assertTrue(version_is_newer("0.1.0-early.10", "0.1.0-early.9"))
         self.assertTrue(version_is_newer("0.1.0", "0.1.0-early.10"))
         self.assertFalse(version_is_newer("0.1.0-early.9", "0.1.0-early.10"))
+        self.assertTrue(version_is_newer("0.1.1-early.2", "0.1.1-early.1"))
 
     def test_platform_payload_uses_specific_platform_first(self):
         manifest = {

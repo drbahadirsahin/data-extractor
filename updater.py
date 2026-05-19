@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 from pathlib import Path
 import platform
@@ -147,6 +148,7 @@ def current_executable() -> Path:
 def stage_update_and_restart(archive_path: Path) -> None:
     if not is_frozen_app():
         raise UpdateError("Self-update is only available for packaged applications.")
+    validate_self_update_target()
     app_root = current_app_root()
     executable = current_executable()
     if os.name == "nt":
@@ -184,13 +186,48 @@ def stage_update_and_restart(archive_path: Path) -> None:
         encoding="utf-8",
     )
     script_path.chmod(0o700)
+    logging.info("Starting update apply script: %s", script_path)
     subprocess.Popen(["/bin/sh", str(script_path)], close_fds=True)
+
+
+def validate_self_update_target() -> None:
+    executable = current_executable()
+    if sys.platform != "darwin":
+        return
+    if is_macos_app_translocated(executable):
+        raise UpdateError(
+            "macOS uygulamayı geçici App Translocation konumundan çalıştırıyor; "
+            "bu durumda güncelleme kalıcı uygulama klasörüne yazılamaz. "
+            "Uygulamayı kapatın, zipten çıkan LLMExtractor-... klasörünü Terminal'e sürükleyerek şu komutu çalıştırın: "
+            "xattr -dr com.apple.quarantine <LLMExtractor klasörü>. "
+            "Ardından uygulamayı aynı klasörden tekrar açın."
+        )
+    app_bundle = macos_app_bundle_for_executable(executable)
+    if app_bundle is not None and not (app_bundle.parent / ".llm_extractor_portable").exists():
+        raise UpdateError(
+            "Otomatik güncelleme için LLMExtractor.app zipten çıkan LLMExtractor-... klasörünün içinde çalışmalıdır. "
+            "Uygulamayı tek başına başka bir klasöre taşıdıysanız zip dosyasını yeniden açın ve uygulamayı üst klasörüyle birlikte çalıştırın."
+        )
+
+
+def is_macos_app_translocated(path: Path | None = None) -> bool:
+    target = path or current_executable()
+    return sys.platform == "darwin" and "AppTranslocation" in str(target)
+
+
+def macos_app_bundle_for_executable(path: Path | None = None) -> Path | None:
+    target = path or current_executable()
+    for parent in target.parents:
+        if parent.suffix == ".app":
+            return parent
+    return None
 
 
 def build_posix_apply_update_script(*, archive_path: Path, app_root: Path, executable: Path, parent_pid: int) -> str:
     archive = shlex.quote(str(archive_path))
     root = shlex.quote(str(app_root))
     exe = shlex.quote(str(executable))
+    log = shlex.quote(str(archive_path.parent / "apply_update.log"))
     return textwrap.dedent(
         f"""
         #!/bin/sh
@@ -199,14 +236,23 @@ def build_posix_apply_update_script(*, archive_path: Path, app_root: Path, execu
         APP_ROOT={root}
         EXECUTABLE={exe}
         PARENT_PID={int(parent_pid)}
+        LOG={log}
+
+        exec >> "$LOG" 2>&1
+        echo "Starting update apply at $(date)"
+        echo "APP_ROOT=$APP_ROOT"
+        echo "EXECUTABLE=$EXECUTABLE"
+        echo "ARCHIVE=$ARCHIVE"
 
         i=0
         while kill -0 "$PARENT_PID" 2>/dev/null && [ "$i" -lt 120 ]; do
           sleep 0.5
           i=$((i + 1))
         done
+        echo "Parent wait finished after $i iterations"
 
         EXTRACT_DIR="$(mktemp -d /tmp/llm_extractor_update.XXXXXX)"
+        echo "Extracting to $EXTRACT_DIR"
         unzip -q "$ARCHIVE" -d "$EXTRACT_DIR"
         CHILDREN="$(find "$EXTRACT_DIR" -mindepth 1 -maxdepth 1 ! -name __MACOSX)"
         CHILD_COUNT="$(printf "%s\\n" "$CHILDREN" | sed '/^$/d' | wc -l | tr -d ' ')"
@@ -215,30 +261,38 @@ def build_posix_apply_update_script(*, archive_path: Path, app_root: Path, execu
         else
           SOURCE_ROOT="$EXTRACT_DIR"
         fi
+        echo "SOURCE_ROOT=$SOURCE_ROOT"
 
         PRESERVE_ROOT="$(mktemp -d /tmp/llm_extractor_preserve.XXXXXX)"
         if [ -d "$APP_ROOT/.llm_extractor_data" ]; then
+          echo "Preserving portable data"
           mv "$APP_ROOT/.llm_extractor_data" "$PRESERVE_ROOT/.llm_extractor_data"
         fi
 
         BACKUP_ROOT="$APP_ROOT.old"
         rm -rf "$BACKUP_ROOT"
         if [ -e "$APP_ROOT" ]; then
+          echo "Moving current app root to backup"
           mv "$APP_ROOT" "$BACKUP_ROOT"
         fi
         mkdir -p "$(dirname "$APP_ROOT")"
+        echo "Installing update"
         mv "$SOURCE_ROOT" "$APP_ROOT"
         if [ -d "$PRESERVE_ROOT/.llm_extractor_data" ] && [ ! -d "$APP_ROOT/.llm_extractor_data" ]; then
+          echo "Restoring portable data"
           mv "$PRESERVE_ROOT/.llm_extractor_data" "$APP_ROOT/.llm_extractor_data"
         fi
         rm -rf "$BACKUP_ROOT"
 
         APP_BUNDLE="$(find "$APP_ROOT" -maxdepth 1 -name '*.app' -type d | head -n 1)"
         if [ -n "$APP_BUNDLE" ] && command -v open >/dev/null 2>&1; then
+          echo "Opening $APP_BUNDLE"
           open "$APP_BUNDLE"
         elif [ -x "$EXECUTABLE" ]; then
+          echo "Opening executable fallback"
           "$EXECUTABLE" >/dev/null 2>&1 &
         fi
+        echo "Update apply finished at $(date)"
         """
     ).strip()
 

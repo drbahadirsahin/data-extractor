@@ -6,7 +6,13 @@ from typing import Any
 
 from gui.i18n import tr
 from release_profile import app_version, startup_updates_enabled
-from updater import check_for_update, download_update, is_frozen_app, stage_update_and_restart
+from updater import (
+    check_for_update,
+    download_update,
+    is_frozen_app,
+    stage_update_and_restart,
+    validate_self_update_target,
+)
 
 
 def run_startup_update_check(app, runtime: Any) -> bool:
@@ -36,6 +42,7 @@ def run_startup_update_check(app, runtime: Any) -> bool:
         update = check_for_update(runtime.app_config)
         if not update:
             return False
+        validate_self_update_target()
         progress.setLabelText(tr("update_downloading", language, version=update["version"]))
 
         def update_download_progress(current: int, total: int) -> None:
@@ -97,6 +104,7 @@ def run_startup_update_check_async(app, runtime: Any) -> bool:
                 if not update:
                     self.no_update.emit()
                     return
+                validate_self_update_target()
                 version = str(update.get("version") or "")
                 self.status_changed.emit("downloading", version)
                 archive_path = download_update(
@@ -177,7 +185,11 @@ def run_startup_update_check_async(app, runtime: Any) -> bool:
 
             progress = self._ensure_progress()
             progress.setLabelText(tr("update_installing", self._language))
-            stage_update_and_restart(Path(archive_path))
+            try:
+                stage_update_and_restart(Path(archive_path))
+            except Exception as exc:
+                self._on_failed(str(exc))
+                return
             QMessageBox.information(
                 None,
                 tr("update_title", self._language),

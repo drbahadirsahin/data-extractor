@@ -5,7 +5,14 @@ from unittest.mock import patch
 
 from release_profile import is_user_profile, show_advanced_ui, show_model_settings
 from settings_store import PORTABLE_DIRNAME, PORTABLE_MARKER, resolve_app_home
-from updater import platform_update_payload, version_is_newer
+from updater import (
+    UpdateError,
+    build_posix_apply_update_script,
+    is_macos_app_translocated,
+    platform_update_payload,
+    validate_self_update_target,
+    version_is_newer,
+)
 
 
 class ReleaseProfileUpdaterTests(unittest.TestCase):
@@ -47,6 +54,67 @@ class ReleaseProfileUpdaterTests(unittest.TestCase):
             "updater.platform.machine", return_value="arm64"
         ):
             self.assertEqual(platform_update_payload(manifest)["url"], "specific")
+
+    def test_macos_app_translocation_detection(self):
+        translocated = Path(
+            "/private/var/folders/x/y/T/AppTranslocation/ABCDEF/d/LLMExtractor.app/Contents/MacOS/LLMExtractor"
+        )
+        normal = Path("/Applications/LLMExtractor.app/Contents/MacOS/LLMExtractor")
+
+        with patch("updater.sys.platform", "darwin"):
+            self.assertTrue(is_macos_app_translocated(translocated))
+            self.assertFalse(is_macos_app_translocated(normal))
+
+        with patch("updater.sys.platform", "linux"):
+            self.assertFalse(is_macos_app_translocated(translocated))
+
+    def test_validate_self_update_target_blocks_translocated_macos_app(self):
+        translocated = Path(
+            "/private/var/folders/x/y/T/AppTranslocation/ABCDEF/d/LLMExtractor.app/Contents/MacOS/LLMExtractor"
+        )
+
+        with patch("updater.sys.platform", "darwin"), patch(
+            "updater.current_executable", return_value=translocated
+        ):
+            with self.assertRaisesRegex(UpdateError, "App Translocation"):
+                validate_self_update_target()
+
+    def test_validate_self_update_target_requires_macos_portable_root_marker(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app_root = Path(temp_dir) / "LLMExtractor.app"
+            executable = app_root / "Contents" / "MacOS" / "LLMExtractor"
+            executable.parent.mkdir(parents=True)
+            executable.write_text("", encoding="utf-8")
+
+            with patch("updater.sys.platform", "darwin"), patch(
+                "updater.current_executable", return_value=executable
+            ):
+                with self.assertRaisesRegex(UpdateError, "üst klasörüyle birlikte"):
+                    validate_self_update_target()
+
+            (Path(temp_dir) / ".llm_extractor_portable").write_text("portable\n", encoding="utf-8")
+            with patch("updater.sys.platform", "darwin"), patch(
+                "updater.current_executable", return_value=executable
+            ):
+                validate_self_update_target()
+
+    def test_posix_apply_update_script_writes_debug_log(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            archive = Path(temp_dir) / "update.zip"
+            app_root = Path(temp_dir) / "LLMExtractor-0.1.0-early.8-macos-arm64"
+            executable = app_root / "LLMExtractor.app" / "Contents" / "MacOS" / "LLMExtractor"
+
+            script = build_posix_apply_update_script(
+                archive_path=archive,
+                app_root=app_root,
+                executable=executable,
+                parent_pid=123,
+            )
+
+        self.assertIn("apply_update.log", script)
+        self.assertIn('exec >> "$LOG" 2>&1', script)
+        self.assertIn("APP_ROOT=", script)
+        self.assertIn('open "$APP_BUNDLE"', script)
 
     def test_frozen_app_home_defaults_next_to_executable(self):
         with tempfile.TemporaryDirectory() as temp_dir:

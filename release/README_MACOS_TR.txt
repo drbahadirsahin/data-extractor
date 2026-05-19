@@ -12,12 +12,21 @@ Bu nedenle macOS ilk açılışta uygulamayı engelleyebilir.
 4. Aç seçeneğini tıklayın.
 5. macOS tekrar sorarsa Aç seçeneğini onaylayın.
 
-Eğer macOS "uygulama hasarlı" veya "doğrulanamadı" benzeri bir uyarı verirse,
-Terminal uygulamasında şu komutu çalıştırın. Komuttaki APP_YOLU yerine
-LLMExtractor.app dosyasının gerçek yolunu yazın veya uygulamayı Terminal
-penceresine sürükleyip bırakın:
+Eğer macOS "uygulama hasarlı" veya "doğrulanamadı" benzeri bir uyarı verirse
+veya uygulama güncellemeyi indirip tekrar aynı sürümle açılıyorsa, Terminal
+uygulamasında şu komutu çalıştırın. Komuttaki KLASOR_YOLU yerine zipten çıkan
+LLMExtractor-...-macos-arm64 klasörünün gerçek yolunu yazın veya bu klasörü
+Terminal penceresine sürükleyip bırakın:
 
-xattr -dr com.apple.quarantine APP_YOLU
+xattr -dr com.apple.quarantine KLASOR_YOLU
+
+Örnek:
+
+xattr -dr com.apple.quarantine "$HOME/Downloads/LLMExtractor-0.1.0-early.8-macos-arm64"
+
+Bu komut yalnızca .app dosyasına değil, zipten çıkan üst klasörün tamamına
+uygulanmalıdır. Aksi halde macOS uygulamayı geçici App Translocation konumundan
+çalıştırabilir ve otomatik güncelleme kalıcı klasöre yazılamaz.
 
 Not:
 Uygulamayı tek başına /Applications içine taşımak yerine, zipten çıkan klasörün

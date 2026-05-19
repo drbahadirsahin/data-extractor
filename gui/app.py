@@ -44,7 +44,8 @@ def launch_gui(argv: list[str] | None = None) -> int:
     app.processEvents()
     QTimer.singleShot(250, lambda: activate_window(window))
     QTimer.singleShot(750, lambda: activate_window(window))
-    QTimer.singleShot(2500, lambda: run_deferred_update_check(app, runtime))
+    QTimer.singleShot(1500, lambda: run_deferred_macos_repair_check(app, runtime))
+    QTimer.singleShot(3200, lambda: run_deferred_update_check(app, runtime))
     logging.info("Main window shown; log file: %s", log_path)
     return app.exec()
 
@@ -116,8 +117,22 @@ def activate_window(window) -> None:
 
 def run_deferred_update_check(app, runtime) -> None:
     try:
+        from updater import macos_needs_portable_repair
+
+        if macos_needs_portable_repair():
+            logging.info("Skipping update check until macOS portable repair is completed")
+            return
         from gui.startup_update import run_startup_update_check_async
 
         run_startup_update_check_async(app, runtime)
     except Exception as exc:
         log_exception("Deferred update check failed", exc)
+
+
+def run_deferred_macos_repair_check(app, runtime) -> None:
+    try:
+        from gui.macos_repair import run_macos_portable_repair_check
+
+        run_macos_portable_repair_check(app, runtime)
+    except Exception as exc:
+        log_exception("Deferred macOS portable repair check failed", exc)

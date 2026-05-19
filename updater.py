@@ -198,9 +198,7 @@ def validate_self_update_target() -> None:
         raise UpdateError(
             "macOS uygulamayı geçici App Translocation konumundan çalıştırıyor; "
             "bu durumda güncelleme kalıcı uygulama klasörüne yazılamaz. "
-            "Uygulamayı kapatın, zipten çıkan LLMExtractor-... klasörünü Terminal'e sürükleyerek şu komutu çalıştırın: "
-            "xattr -dr com.apple.quarantine <LLMExtractor klasörü>. "
-            "Ardından uygulamayı aynı klasörden tekrar açın."
+            "Uygulamanın zipten çıkan LLMExtractor-... klasörünü seçerek macOS hazırlığını tamamlayın."
         )
     app_bundle = macos_app_bundle_for_executable(executable)
     if app_bundle is not None and not (app_bundle.parent / ".llm_extractor_portable").exists():
@@ -221,6 +219,52 @@ def macos_app_bundle_for_executable(path: Path | None = None) -> Path | None:
         if parent.suffix == ".app":
             return parent
     return None
+
+
+def macos_needs_portable_repair() -> bool:
+    return sys.platform == "darwin" and is_frozen_app() and is_macos_app_translocated(current_executable())
+
+
+def normalize_macos_portable_root(path: Path) -> Path:
+    root = Path(path).expanduser().resolve()
+    if root.suffix == ".app":
+        root = root.parent
+    marker = root / ".llm_extractor_portable"
+    app_bundles = sorted(child for child in root.glob("*.app") if child.is_dir())
+    if not marker.exists() or not app_bundles:
+        raise UpdateError(
+            "Seçilen klasör geçerli bir LLMExtractor klasörü değil. "
+            "Zipten çıkan LLMExtractor-... üst klasörünü seçin."
+        )
+    return root
+
+
+def macos_portable_app_bundle(root: Path) -> Path:
+    portable_root = normalize_macos_portable_root(root)
+    app_bundles = sorted(child for child in portable_root.glob("*.app") if child.is_dir())
+    if not app_bundles:
+        raise UpdateError("Seçilen klasörde LLMExtractor.app bulunamadı.")
+    preferred = portable_root / "LLMExtractor.app"
+    if preferred.exists():
+        return preferred
+    return app_bundles[0]
+
+
+def remove_macos_quarantine(root: Path) -> None:
+    portable_root = normalize_macos_portable_root(root)
+    command = ["/usr/bin/xattr", "-dr", "com.apple.quarantine", str(portable_root)]
+    result = subprocess.run(command, capture_output=True, text=True, check=False)
+    if result.returncode != 0:
+        message = (result.stderr or result.stdout or "").strip()
+        raise UpdateError(message or "macOS güvenlik hazırlığı tamamlanamadı.")
+
+
+def repair_macos_portable_and_relaunch(root: Path) -> Path:
+    portable_root = normalize_macos_portable_root(root)
+    remove_macos_quarantine(portable_root)
+    app_bundle = macos_portable_app_bundle(portable_root)
+    subprocess.Popen(["/usr/bin/open", "-n", str(app_bundle)], close_fds=True)
+    return app_bundle
 
 
 def build_posix_apply_update_script(*, archive_path: Path, app_root: Path, executable: Path, parent_pid: int) -> str:

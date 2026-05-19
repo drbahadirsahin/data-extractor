@@ -9,7 +9,12 @@ from updater import (
     UpdateError,
     build_posix_apply_update_script,
     is_macos_app_translocated,
+    macos_needs_portable_repair,
+    macos_portable_app_bundle,
+    normalize_macos_portable_root,
     platform_update_payload,
+    remove_macos_quarantine,
+    repair_macos_portable_and_relaunch,
     validate_self_update_target,
     version_is_newer,
 )
@@ -97,6 +102,69 @@ class ReleaseProfileUpdaterTests(unittest.TestCase):
                 "updater.current_executable", return_value=executable
             ):
                 validate_self_update_target()
+
+    def test_macos_portable_root_accepts_root_or_app_bundle(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir) / "LLMExtractor-0.1.0-early.9-macos-arm64"
+            bundle = root / "LLMExtractor.app"
+            bundle.mkdir(parents=True)
+            (root / ".llm_extractor_portable").write_text("portable\n", encoding="utf-8")
+
+            self.assertEqual(normalize_macos_portable_root(root), root.resolve())
+            self.assertEqual(normalize_macos_portable_root(bundle), root.resolve())
+            self.assertEqual(macos_portable_app_bundle(root), bundle.resolve())
+
+    def test_macos_portable_root_rejects_invalid_folder(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with self.assertRaisesRegex(UpdateError, "geçerli bir LLMExtractor"):
+                normalize_macos_portable_root(Path(temp_dir))
+
+    def test_macos_needs_portable_repair_requires_frozen_translocated_app(self):
+        translocated = Path(
+            "/private/var/folders/x/y/T/AppTranslocation/ABCDEF/d/LLMExtractor.app/Contents/MacOS/LLMExtractor"
+        )
+        with patch("updater.sys.platform", "darwin"), patch(
+            "updater.current_executable", return_value=translocated
+        ), patch("updater.is_frozen_app", return_value=True):
+            self.assertTrue(macos_needs_portable_repair())
+
+        with patch("updater.sys.platform", "darwin"), patch(
+            "updater.current_executable", return_value=translocated
+        ), patch("updater.is_frozen_app", return_value=False):
+            self.assertFalse(macos_needs_portable_repair())
+
+    def test_remove_macos_quarantine_runs_xattr_on_portable_root(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir) / "LLMExtractor-0.1.0-early.9-macos-arm64"
+            (root / "LLMExtractor.app").mkdir(parents=True)
+            (root / ".llm_extractor_portable").write_text("portable\n", encoding="utf-8")
+
+            with patch("updater.subprocess.run") as run:
+                run.return_value.returncode = 0
+                run.return_value.stdout = ""
+                run.return_value.stderr = ""
+                remove_macos_quarantine(root)
+
+            run.assert_called_once()
+            self.assertEqual(
+                run.call_args.args[0],
+                ["/usr/bin/xattr", "-dr", "com.apple.quarantine", str(root.resolve())],
+            )
+
+    def test_repair_macos_portable_relaunches_selected_app_bundle(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir) / "LLMExtractor-0.1.0-early.9-macos-arm64"
+            app_bundle = root / "LLMExtractor.app"
+            app_bundle.mkdir(parents=True)
+            (root / ".llm_extractor_portable").write_text("portable\n", encoding="utf-8")
+
+            with patch("updater.subprocess.run") as run, patch("updater.subprocess.Popen") as popen:
+                run.return_value.returncode = 0
+                run.return_value.stdout = ""
+                run.return_value.stderr = ""
+                self.assertEqual(repair_macos_portable_and_relaunch(root), app_bundle.resolve())
+
+            popen.assert_called_once_with(["/usr/bin/open", "-n", str(app_bundle.resolve())], close_fds=True)
 
     def test_posix_apply_update_script_writes_debug_log(self):
         with tempfile.TemporaryDirectory() as temp_dir:

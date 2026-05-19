@@ -47,6 +47,9 @@ class ReleaseProfileUpdaterTests(unittest.TestCase):
     def test_version_comparison_handles_early_release_suffix(self):
         self.assertTrue(version_is_newer("0.1.1", "0.1.0-early.1"))
         self.assertFalse(version_is_newer("0.1.0-early.1", "0.1.0-early.1"))
+        self.assertTrue(version_is_newer("0.1.0-early.10", "0.1.0-early.9"))
+        self.assertTrue(version_is_newer("0.1.0", "0.1.0-early.10"))
+        self.assertFalse(version_is_newer("0.1.0-early.9", "0.1.0-early.10"))
 
     def test_platform_payload_uses_specific_platform_first(self):
         manifest = {

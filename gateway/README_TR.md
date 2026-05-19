@@ -19,6 +19,10 @@ Masaüstü paketinde OpenRouter API key bulunmaz. Gateway de istek gövdesini lo
 - Masaüstü uygulama `llm_gateway` sağlayıcısını tanır.
 - Varsayılan masaüstü ayarı henüz gateway'e çevrilmez.
 
+`early.9 -> early.10` geçişinde eski sürüm karşılaştırma mantığı iki haneli
+`early.10` değerini yanlış değerlendirdiği için düzeltme `0.1.1-early.1`
+köprü sürümüyle yayınlanmıştır.
+
 Gateway yayına alındıktan sonra `early.11` ile `app_config.json` içindeki `llm.base_url` gateway adresine çevrilecek.
 
 ## Cloudflare Worker kurulumu

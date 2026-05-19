@@ -6,6 +6,7 @@ import logging
 import os
 from pathlib import Path
 import platform
+import re
 import shlex
 import subprocess
 import sys
@@ -78,7 +79,7 @@ def version_is_newer(candidate: str, current: str) -> bool:
     return version_key(candidate) > version_key(current)
 
 
-def version_key(value: str) -> tuple[tuple[int, ...], str]:
+def version_key(value: str) -> tuple[tuple[int, ...], int, tuple[tuple[int, int, str], ...]]:
     text = str(value).strip().lstrip("v")
     main, _, suffix = text.partition("-")
     numbers: list[int] = []
@@ -89,7 +90,20 @@ def version_key(value: str) -> tuple[tuple[int, ...], str]:
             numbers.append(0)
     while len(numbers) < 3:
         numbers.append(0)
-    return tuple(numbers), suffix
+    release_rank = 1 if not suffix else 0
+    return tuple(numbers), release_rank, prerelease_key(suffix)
+
+
+def prerelease_key(value: str) -> tuple[tuple[int, int, str], ...]:
+    parts: list[tuple[int, int, str]] = []
+    for part in re.split(r"[._-]+", value):
+        if not part:
+            continue
+        if part.isdigit():
+            parts.append((0, int(part), ""))
+        else:
+            parts.append((1, 0, part.lower()))
+    return tuple(parts)
 
 
 def download_update(payload: dict[str, Any], *, progress_callback=None) -> Path:

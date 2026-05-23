@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Any, Callable
 
@@ -7,7 +8,7 @@ from llm_settings import managed_llm_settings_from_config
 from runtime_context import RuntimeContext
 from gui.i18n import tr
 from release_profile import app_version, show_advanced_ui
-from redcap_client import RedcapAPIError
+from redcap_client import RedcapAPIError, has_redcap_user_context_value, load_redcap_user_context_module_config
 from settings_store import RedcapProjectToken
 from workspace_flow import ensure_project_config
 
@@ -733,19 +734,27 @@ class ClinicalRedcapPage:
         self.save_connection()
 
     def fetch_user_context(self, client) -> Any:
+        module_config = load_redcap_user_context_module_config(self.runtime.app_config)
+        if module_config.can_request:
+            try:
+                context = client.get_external_module_user_context(
+                    prefix=module_config.prefix,
+                    action=module_config.action,
+                )
+                if has_redcap_user_context_value(context):
+                    return context
+            except RedcapAPIError as exc:
+                logging.info("External module user context request failed: %s", exc)
+            except Exception as exc:
+                logging.info("External module user context request failed: %s", exc)
+
         try:
             context = client.get_user_context()
         except RedcapAPIError:
             return None
         except Exception:
             return None
-        if not any(
-            [
-                getattr(context, "username", None),
-                getattr(context, "data_access_group", None),
-                getattr(context, "data_access_group_unique_name", None),
-            ]
-        ):
+        if not has_redcap_user_context_value(context):
             return None
         return context
 

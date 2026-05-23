@@ -1,6 +1,6 @@
 {
   "release": {
-    "version": "0.1.1-early.23",
+    "version": "0.1.1-early.24",
     "profile": "user",
     "channel": "early",
     "updates": {
@@ -46,6 +46,11 @@
     "tc_field": "tc_identity",
     "record_id_field": "record",
     "timeout_seconds": 30
+  },
+  "redcap_user_context": {
+    "enabled": true,
+    "prefix": "tc_hash",
+    "action": "get-api-user-context"
   },
   "ui": {
     "mode": "clinical"

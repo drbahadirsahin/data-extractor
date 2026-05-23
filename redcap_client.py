@@ -26,6 +26,17 @@ class RedcapUserContext:
     api_export: bool | None = None
 
 
+@dataclass
+class RedcapUserContextModuleConfig:
+    enabled: bool = False
+    prefix: str = "tc_hash"
+    action: str = "get-api-user-context"
+
+    @property
+    def can_request(self) -> bool:
+        return bool(self.enabled and self.prefix.strip() and self.action.strip())
+
+
 class RedcapAPIError(RuntimeError):
     pass
 
@@ -152,6 +163,23 @@ class RedcapClient:
     def get_user_context(self, username_hint: str | None = None) -> RedcapUserContext:
         return infer_user_context(self.export_users(), username_hint=username_hint)
 
+    def get_external_module_user_context(
+        self,
+        *,
+        prefix: str = "tc_hash",
+        action: str = "get-api-user-context",
+    ) -> RedcapUserContext:
+        payload = {
+            "token": self.api_token,
+            "content": "externalModule",
+            "prefix": prefix,
+            "action": action,
+            "format": "json",
+            "returnFormat": "json",
+        }
+        response = self._post_form(payload)
+        return parse_external_module_user_context_response(response)
+
     def import_records(
         self,
         records: list[dict[str, Any]],
@@ -248,6 +276,17 @@ def coerce_optional_text(value: Any) -> str | None:
         return None
     text = str(value).strip()
     return text or None
+
+
+def load_redcap_user_context_module_config(app_config: dict[str, Any]) -> RedcapUserContextModuleConfig:
+    payload = app_config.get("redcap_user_context", {}) if isinstance(app_config, dict) else {}
+    if not isinstance(payload, dict):
+        payload = {}
+    return RedcapUserContextModuleConfig(
+        enabled=bool(payload.get("enabled", False)),
+        prefix=str(payload.get("prefix", "tc_hash") or "tc_hash"),
+        action=str(payload.get("action", "get-api-user-context") or "get-api-user-context"),
+    )
 
 
 def normalize_redcap_api_url(api_url: str) -> str:
@@ -437,6 +476,51 @@ def parse_json_or_csv_list(response: str) -> list[dict[str, Any]]:
     return [item for item in csv.DictReader(io.StringIO(stripped))]
 
 
+def parse_external_module_user_context_response(response: str) -> RedcapUserContext:
+    stripped = response.strip()
+    if not stripped:
+        return RedcapUserContext()
+    if "<error>" in stripped.lower():
+        raise RedcapAPIError(extract_xml_error_message(stripped))
+    if stripped.startswith("{") or stripped.startswith("["):
+        raw = json.loads(stripped)
+    else:
+        parsed_form = parse.parse_qs(stripped, keep_blank_values=True)
+        raw = {key: values[0] if values else "" for key, values in parsed_form.items()}
+    return user_context_from_external_module_payload(raw)
+
+
+def user_context_from_external_module_payload(payload: Any) -> RedcapUserContext:
+    if isinstance(payload, list):
+        for item in payload:
+            context = user_context_from_external_module_payload(item)
+            if has_redcap_user_context_value(context):
+                return context
+        return RedcapUserContext()
+    if not isinstance(payload, dict):
+        return RedcapUserContext()
+
+    for key in ["data", "context", "user_context", "api_user_context"]:
+        nested = payload.get(key)
+        if isinstance(nested, (dict, list)):
+            context = user_context_from_external_module_payload(nested)
+            if has_redcap_user_context_value(context):
+                return context
+    return build_user_context(payload)
+
+
+def has_redcap_user_context_value(context: RedcapUserContext | None) -> bool:
+    if context is None:
+        return False
+    return any(
+        [
+            context.username,
+            context.data_access_group,
+            context.data_access_group_unique_name,
+        ]
+    )
+
+
 def parse_form_event_mapping_response(response: str) -> dict[str, list[str]]:
     items = parse_json_or_csv_list(response)
     mapping: dict[str, list[str]] = {}
@@ -493,12 +577,16 @@ def build_user_context(row: dict[str, Any]) -> RedcapUserContext:
         row.get("data_access_group")
         or row.get("redcap_data_access_group")
         or row.get("data_access_group_name")
+        or row.get("dag")
+        or row.get("dag_name")
     )
     dag_unique = coerce_optional_text(
         row.get("unique_group_name")
         or row.get("data_access_group_unique_name")
         or row.get("redcap_data_access_group")
         or row.get("data_access_group")
+        or row.get("dag_unique_name")
+        or row.get("dag")
     )
     return RedcapUserContext(
         username=username,

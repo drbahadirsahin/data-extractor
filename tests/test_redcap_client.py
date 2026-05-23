@@ -6,7 +6,10 @@ from redcap_client import (
     RedcapAPIError,
     RedcapClient,
     build_redcap_api_url_candidates,
+    has_redcap_user_context_value,
+    load_redcap_user_context_module_config,
     normalize_redcap_api_url,
+    parse_external_module_user_context_response,
     parse_import_record_response,
     parse_form_event_mapping_response,
     infer_user_context,
@@ -168,6 +171,65 @@ class RedcapClientTests(unittest.TestCase):
 
         self.assertEqual(context.username, "second")
         self.assertEqual(context.data_access_group, "B")
+
+    def test_load_redcap_user_context_module_config(self) -> None:
+        config = load_redcap_user_context_module_config(
+            {
+                "redcap_user_context": {
+                    "enabled": True,
+                    "prefix": "tc_hash",
+                    "action": "get-api-user-context",
+                }
+            }
+        )
+
+        self.assertTrue(config.can_request)
+        self.assertEqual(config.prefix, "tc_hash")
+        self.assertEqual(config.action, "get-api-user-context")
+
+    def test_parse_external_module_user_context_response(self) -> None:
+        context = parse_external_module_user_context_response(
+            json.dumps(
+                {
+                    "ok": True,
+                    "project_id": "17",
+                    "username": "bahadir2",
+                    "data_access_group": "Marmara",
+                    "data_access_group_unique_name": "marmara",
+                    "api_import": True,
+                    "api_export": "1",
+                }
+            )
+        )
+
+        self.assertEqual(context.username, "bahadir2")
+        self.assertEqual(context.data_access_group, "Marmara")
+        self.assertEqual(context.data_access_group_unique_name, "marmara")
+        self.assertTrue(context.api_import)
+        self.assertTrue(context.api_export)
+        self.assertTrue(has_redcap_user_context_value(context))
+
+    def test_external_module_user_context_posts_expected_payload(self) -> None:
+        client = RedcapClient("https://redcap.example/api/", "token")
+        with patch.object(
+            client,
+            "_post_form",
+            return_value=json.dumps({"data": {"username": "api-user", "dag": "DAG A"}}),
+        ) as post_form:
+            context = client.get_external_module_user_context(
+                prefix="tc_hash",
+                action="get-api-user-context",
+            )
+
+        post_form.assert_called_once()
+        payload = post_form.call_args.args[0]
+        self.assertEqual(payload["content"], "externalModule")
+        self.assertEqual(payload["prefix"], "tc_hash")
+        self.assertEqual(payload["action"], "get-api-user-context")
+        self.assertEqual(payload["format"], "json")
+        self.assertEqual(payload["returnFormat"], "json")
+        self.assertEqual(context.username, "api-user")
+        self.assertEqual(context.data_access_group, "DAG A")
 
 
 if __name__ == "__main__":

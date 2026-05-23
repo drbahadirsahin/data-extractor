@@ -9,6 +9,7 @@ from redcap_client import (
     normalize_redcap_api_url,
     parse_import_record_response,
     parse_form_event_mapping_response,
+    infer_user_context,
     parse_instrument_response,
     parse_project_response,
     parse_repeating_events_response,
@@ -128,6 +129,45 @@ class RedcapClientTests(unittest.TestCase):
             ]
         )
         self.assertEqual(parse_repeating_events_response(response), ["event_1_arm_1", "event_2_arm_1"])
+
+    def test_infer_user_context_from_single_user_export(self) -> None:
+        context = infer_user_context(
+            [
+                {
+                    "username": "bahadir2",
+                    "data_access_group": "Marmara",
+                    "api_import": "1",
+                    "api_export": "1",
+                }
+            ]
+        )
+
+        self.assertEqual(context.username, "bahadir2")
+        self.assertEqual(context.data_access_group, "Marmara")
+        self.assertTrue(context.api_import)
+        self.assertTrue(context.api_export)
+
+    def test_infer_user_context_avoids_guessing_among_multiple_users(self) -> None:
+        context = infer_user_context(
+            [
+                {"username": "first", "data_access_group": "A"},
+                {"username": "second", "data_access_group": "B"},
+            ]
+        )
+
+        self.assertIsNone(context.username)
+        self.assertIsNone(context.data_access_group)
+
+    def test_infer_user_context_uses_current_user_marker(self) -> None:
+        context = infer_user_context(
+            [
+                {"username": "first", "data_access_group": "A"},
+                {"username": "second", "data_access_group": "B", "current_user": "1"},
+            ]
+        )
+
+        self.assertEqual(context.username, "second")
+        self.assertEqual(context.data_access_group, "B")
 
 
 if __name__ == "__main__":

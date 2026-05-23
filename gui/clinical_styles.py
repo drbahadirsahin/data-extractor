@@ -162,6 +162,26 @@ QLabel#WarningPill {
     font-weight: 650;
 }
 
+QLabel#UserContextPill {
+    background: #ffffff;
+    color: #334155;
+    border: 1px solid #d8d5cc;
+    border-radius: 8px;
+    padding: 6px 10px;
+    font-size: 12px;
+    font-weight: 650;
+}
+
+QLabel#UserContextPillMuted {
+    background: #f2f4f5;
+    color: #72808d;
+    border: 1px solid #e0ded7;
+    border-radius: 8px;
+    padding: 6px 10px;
+    font-size: 12px;
+    font-weight: 650;
+}
+
 QPushButton {
     background: #0f766e;
     color: #ffffff;

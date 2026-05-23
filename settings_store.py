@@ -45,6 +45,9 @@ class RedcapProjectToken:
     project_id: str
     project_name: str
     token_secret_name: str
+    username: str | None = None
+    data_access_group: str | None = None
+    data_access_group_unique_name: str | None = None
 
     @classmethod
     def from_dict(cls, payload: dict[str, Any] | None) -> "RedcapProjectToken | None":
@@ -60,6 +63,9 @@ class RedcapProjectToken:
             project_id=project_id,
             project_name=project_name,
             token_secret_name=token_secret_name,
+            username=coerce_optional_str(payload.get("username")),
+            data_access_group=coerce_optional_str(payload.get("data_access_group")),
+            data_access_group_unique_name=coerce_optional_str(payload.get("data_access_group_unique_name")),
         )
 
 

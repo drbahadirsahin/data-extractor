@@ -17,6 +17,15 @@ class RedcapProject:
     is_longitudinal: bool | None = None
 
 
+@dataclass
+class RedcapUserContext:
+    username: str | None = None
+    data_access_group: str | None = None
+    data_access_group_unique_name: str | None = None
+    api_import: bool | None = None
+    api_export: bool | None = None
+
+
 class RedcapAPIError(RuntimeError):
     pass
 
@@ -127,6 +136,22 @@ class RedcapClient:
             raise RedcapAPIError(extract_xml_error_message(stripped))
         return parse_form_event_mapping_response(stripped)
 
+    def export_users(self) -> list[dict[str, Any]]:
+        payload = {
+            "token": self.api_token,
+            "content": "user",
+            "format": "json",
+            "returnFormat": "json",
+        }
+        response = self._post_form(payload)
+        stripped = response.strip()
+        if "<error>" in stripped.lower():
+            raise RedcapAPIError(extract_xml_error_message(stripped))
+        return parse_json_or_csv_list(stripped)
+
+    def get_user_context(self, username_hint: str | None = None) -> RedcapUserContext:
+        return infer_user_context(self.export_users(), username_hint=username_hint)
+
     def import_records(
         self,
         records: list[dict[str, Any]],
@@ -216,6 +241,13 @@ def coerce_optional_bool(value: Any) -> bool | None:
     if text in {"0", "false", "no", "n"}:
         return False
     return None
+
+
+def coerce_optional_text(value: Any) -> str | None:
+    if value in {None, ""}:
+        return None
+    text = str(value).strip()
+    return text or None
 
 
 def normalize_redcap_api_url(api_url: str) -> str:
@@ -426,3 +458,52 @@ def parse_form_event_mapping_response(response: str) -> dict[str, list[str]]:
         if event_key not in bucket:
             bucket.append(event_key)
     return mapping
+
+
+def infer_user_context(users: list[dict[str, Any]], username_hint: str | None = None) -> RedcapUserContext:
+    if not users:
+        return RedcapUserContext()
+    normalized_hint = (username_hint or "").strip().lower()
+    if normalized_hint:
+        for row in users:
+            username = coerce_optional_text(
+                row.get("username") or row.get("user") or row.get("redcap_user") or row.get("user_name")
+            )
+            if username and username.lower() == normalized_hint:
+                return build_user_context(row)
+    for row in users:
+        marker = (
+            row.get("current_user")
+            or row.get("is_current_user")
+            or row.get("api_user")
+            or row.get("is_api_user")
+        )
+        if coerce_optional_bool(marker) is True:
+            return build_user_context(row)
+    if len(users) == 1:
+        return build_user_context(users[0])
+    return RedcapUserContext()
+
+
+def build_user_context(row: dict[str, Any]) -> RedcapUserContext:
+    username = coerce_optional_text(
+        row.get("username") or row.get("user") or row.get("redcap_user") or row.get("user_name")
+    )
+    dag_label = coerce_optional_text(
+        row.get("data_access_group")
+        or row.get("redcap_data_access_group")
+        or row.get("data_access_group_name")
+    )
+    dag_unique = coerce_optional_text(
+        row.get("unique_group_name")
+        or row.get("data_access_group_unique_name")
+        or row.get("redcap_data_access_group")
+        or row.get("data_access_group")
+    )
+    return RedcapUserContext(
+        username=username,
+        data_access_group=dag_label,
+        data_access_group_unique_name=dag_unique,
+        api_import=coerce_optional_bool(row.get("api_import")),
+        api_export=coerce_optional_bool(row.get("api_export")),
+    )

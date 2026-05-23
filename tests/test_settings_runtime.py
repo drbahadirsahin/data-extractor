@@ -34,6 +34,9 @@ class SettingsAndRuntimeTests(unittest.TestCase):
                     project_id="42",
                     project_name="Proje 42",
                     token_secret_name="redcap_api_token_42",
+                    username="bahadir2",
+                    data_access_group="Marmara",
+                    data_access_group_unique_name="marmara",
                 )
             ]
             settings.ui.language = "en"
@@ -48,6 +51,9 @@ class SettingsAndRuntimeTests(unittest.TestCase):
             self.assertEqual(loaded.redcap.selected_project_name, "Proje 42")
             self.assertEqual(loaded.redcap.selected_project_token_secret_name, "redcap_api_token_42")
             self.assertEqual(len(loaded.redcap.saved_project_tokens), 1)
+            self.assertEqual(loaded.redcap.saved_project_tokens[0].username, "bahadir2")
+            self.assertEqual(loaded.redcap.saved_project_tokens[0].data_access_group, "Marmara")
+            self.assertEqual(loaded.redcap.saved_project_tokens[0].data_access_group_unique_name, "marmara")
             self.assertEqual(loaded.ui.language, "en")
 
     def test_secrets_store_round_trip(self) -> None:

@@ -935,6 +935,12 @@ class ReviewDialog(QDialog):
         if error_text.startswith("duplicate_tc_identity:"):
             record_id = error_text.split(":", 1)[1].strip()
             return tr("review_error_duplicate_tc_identity", self.language, record_id=record_id or "-")
+        if (
+            error_text.startswith("Identity registry request failed with HTTP 403")
+            and "API" in error_text
+            and ("import" in error_text.lower() or "içe aktarma" in error_text.lower())
+        ):
+            return tr("review_error_identity_registry_api_import_forbidden", self.language)
         return error_text
 
     def format_unsubmittable_field_issues(self, issues: list[UnsubmittableFieldIssue], limit: int = 20) -> str:

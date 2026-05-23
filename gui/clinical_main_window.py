@@ -7,6 +7,7 @@ from llm_settings import managed_llm_settings_from_config
 from runtime_context import RuntimeContext
 from gui.i18n import tr
 from release_profile import app_version, show_advanced_ui
+from redcap_client import RedcapAPIError
 from settings_store import RedcapProjectToken
 from workspace_flow import ensure_project_config
 
@@ -166,7 +167,16 @@ class ClinicalMainWindow:
         content = QWidget()
         content_layout = QVBoxLayout(content)
         content_layout.setContentsMargins(26, 22, 26, 22)
-        content_layout.setSpacing(18)
+        content_layout.setSpacing(10)
+
+        top_status_row = QHBoxLayout()
+        top_status_row.setContentsMargins(0, 0, 0, 0)
+        top_status_row.addStretch(1)
+        self.user_context_label = QLabel("")
+        self.user_context_label.setObjectName("UserContextPill")
+        self.user_context_label.setWordWrap(False)
+        top_status_row.addWidget(self.user_context_label)
+        content_layout.addLayout(top_status_row)
         content_layout.addWidget(self.stack)
 
         layout.addWidget(sidebar)
@@ -186,8 +196,43 @@ class ClinicalMainWindow:
 
     def refresh_connection_state(self) -> None:
         self.populate_connection_project_combo()
+        self.refresh_user_context_label()
         self.home_page.refresh()
         self.import_page.refresh()
+
+    def refresh_user_context_label(self) -> None:
+        project = self.current_project_token()
+        if project is None:
+            self.user_context_label.setObjectName("UserContextPillMuted")
+            self.user_context_label.setText(tr("clinical_user_context_missing", self.language))
+            self.user_context_label.setToolTip(tr("clinical_not_connected", self.language))
+        else:
+            username = project.username or tr("clinical_user_unknown", self.language)
+            dag = project.data_access_group or project.data_access_group_unique_name or tr("clinical_dag_none", self.language)
+            self.user_context_label.setObjectName("UserContextPill")
+            self.user_context_label.setText(
+                tr("clinical_user_context", self.language, username=username, dag=dag)
+            )
+            self.user_context_label.setToolTip(
+                tr(
+                    "clinical_user_context_tooltip",
+                    self.language,
+                    project=project.project_name,
+                    username=username,
+                    dag=dag,
+                )
+            )
+        self.user_context_label.style().unpolish(self.user_context_label)
+        self.user_context_label.style().polish(self.user_context_label)
+
+    def current_project_token(self) -> RedcapProjectToken | None:
+        selected_project_id = self.runtime.settings.redcap.selected_project_id
+        if not selected_project_id:
+            return None
+        for project in self.runtime.settings.redcap.saved_project_tokens:
+            if project.project_id == str(selected_project_id):
+                return project
+        return None
 
     def populate_connection_project_combo(self) -> None:
         current_project_id = self.runtime.settings.redcap.selected_project_id
@@ -625,6 +670,7 @@ class ClinicalRedcapPage:
         self.on_saved = on_saved
         self.language = runtime.settings.ui.language
         self.validated_project = None
+        self.validated_user_context = None
         self.RedcapAPIError = RedcapAPIError
         self.RedcapClient = RedcapClient
 
@@ -660,6 +706,8 @@ class ClinicalRedcapPage:
         self.token_input.setEchoMode(QLineEdit.EchoMode.Password)
         self.project_value = QLabel("-")
         self.project_value.setWordWrap(True)
+        self.user_context_value = QLabel("-")
+        self.user_context_value.setWordWrap(True)
         self.saved_projects = QComboBox()
         self.populate_saved_projects()
         self.update_selected_project_display()
@@ -668,6 +716,7 @@ class ClinicalRedcapPage:
         form.addRow(tr("redcap_api_url", self.language), self.api_url_input)
         form.addRow(tr("redcap_api_token", self.language), self.token_input)
         form.addRow(tr("validated_project", self.language), self.project_value)
+        form.addRow(tr("redcap_user_context", self.language), self.user_context_value)
         form.addRow(tr("saved_redcap_projects", self.language), self.saved_projects)
         panel_layout.addLayout(form)
 
@@ -699,21 +748,45 @@ class ClinicalRedcapPage:
             self.status.setText(tr("redcap_missing_credentials", self.language))
             return
         try:
-            project = self.RedcapClient(api_url=api_url, api_token=token).get_project()
+            client = self.RedcapClient(api_url=api_url, api_token=token)
+            project = client.get_project()
         except self.RedcapAPIError as exc:
             self.validated_project = None
+            self.validated_user_context = None
             self.project_value.setText("-")
+            self.user_context_value.setText("-")
             self.status.setText(str(exc))
             return
         if project is None:
             self.validated_project = None
+            self.validated_user_context = None
             self.project_value.setText("-")
+            self.user_context_value.setText("-")
             self.status.setText(tr("redcap_no_projects", self.language))
             return
+        self.validated_user_context = self.fetch_user_context(client)
         self.validated_project = project
         self.project_value.setText(f"{project.project_title} ({project.project_id})")
+        self.user_context_value.setText(format_redcap_user_context(self.validated_user_context, self.language))
         self.status.setText(tr("redcap_project_validated", self.language, project=project.project_title))
         self.save_connection()
+
+    def fetch_user_context(self, client) -> Any:
+        try:
+            context = client.get_user_context()
+        except RedcapAPIError:
+            return None
+        except Exception:
+            return None
+        if not any(
+            [
+                getattr(context, "username", None),
+                getattr(context, "data_access_group", None),
+                getattr(context, "data_access_group_unique_name", None),
+            ]
+        ):
+            return None
+        return context
 
     def save_connection(self) -> None:
         from PySide6.QtWidgets import QMessageBox
@@ -738,6 +811,9 @@ class ClinicalRedcapPage:
                 project_id=project.project_id,
                 project_name=project.project_title,
                 token_secret_name=token_secret_name,
+                username=getattr(self.validated_user_context, "username", None),
+                data_access_group=getattr(self.validated_user_context, "data_access_group", None),
+                data_access_group_unique_name=getattr(self.validated_user_context, "data_access_group_unique_name", None),
             ),
         )
         settings.first_run_completed = True
@@ -791,6 +867,7 @@ class ClinicalRedcapPage:
                 continue
             self.api_url_input.setText(project.api_url)
             self.project_value.setText(f"{project.project_name} ({project.project_id})")
+            self.user_context_value.setText(format_project_user_context(project, self.language))
             return
 
     def select_saved_project(self) -> None:
@@ -808,6 +885,7 @@ class ClinicalRedcapPage:
             self.runtime.settings_store.save(settings)
             self.api_url_input.setText(project.api_url)
             self.project_value.setText(f"{project.project_name} ({project.project_id})")
+            self.user_context_value.setText(format_project_user_context(project, self.language))
             self.status.setText(tr("redcap_project_selected", self.language, project=project.project_name))
             self.on_saved()
             return
@@ -1321,6 +1399,24 @@ def build_workflow_card(title: str, body: str, primary_label: str, primary_actio
 def build_redcap_token_secret_name(project_id: str | None) -> str:
     suffix = str(project_id or "default").strip() or "default"
     return f"redcap_api_token_{suffix}"
+
+
+def format_redcap_user_context(context: Any, language: str) -> str:
+    if context is None:
+        return tr("redcap_user_context_unknown", language)
+    username = getattr(context, "username", None) or tr("clinical_user_unknown", language)
+    dag = (
+        getattr(context, "data_access_group", None)
+        or getattr(context, "data_access_group_unique_name", None)
+        or tr("clinical_dag_none", language)
+    )
+    return tr("clinical_user_context", language, username=username, dag=dag)
+
+
+def format_project_user_context(project: RedcapProjectToken, language: str) -> str:
+    username = project.username or tr("clinical_user_unknown", language)
+    dag = project.data_access_group or project.data_access_group_unique_name or tr("clinical_dag_none", language)
+    return tr("clinical_user_context", language, username=username, dag=dag)
 
 
 def upsert_project_token(tokens: list[RedcapProjectToken], project: RedcapProjectToken) -> None:

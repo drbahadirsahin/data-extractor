@@ -167,16 +167,7 @@ class ClinicalMainWindow:
         content = QWidget()
         content_layout = QVBoxLayout(content)
         content_layout.setContentsMargins(26, 22, 26, 22)
-        content_layout.setSpacing(10)
-
-        top_status_row = QHBoxLayout()
-        top_status_row.setContentsMargins(0, 0, 0, 0)
-        top_status_row.addStretch(1)
-        self.user_context_label = QLabel("")
-        self.user_context_label.setObjectName("UserContextPill")
-        self.user_context_label.setWordWrap(False)
-        top_status_row.addWidget(self.user_context_label)
-        content_layout.addLayout(top_status_row)
+        content_layout.setSpacing(18)
         content_layout.addWidget(self.stack)
 
         layout.addWidget(sidebar)
@@ -196,43 +187,8 @@ class ClinicalMainWindow:
 
     def refresh_connection_state(self) -> None:
         self.populate_connection_project_combo()
-        self.refresh_user_context_label()
         self.home_page.refresh()
         self.import_page.refresh()
-
-    def refresh_user_context_label(self) -> None:
-        project = self.current_project_token()
-        if project is None:
-            self.user_context_label.setObjectName("UserContextPillMuted")
-            self.user_context_label.setText(tr("clinical_user_context_missing", self.language))
-            self.user_context_label.setToolTip(tr("clinical_not_connected", self.language))
-        else:
-            username = project.username or tr("clinical_user_unknown", self.language)
-            dag = project.data_access_group or project.data_access_group_unique_name or tr("clinical_dag_none", self.language)
-            self.user_context_label.setObjectName("UserContextPill")
-            self.user_context_label.setText(
-                tr("clinical_user_context", self.language, username=username, dag=dag)
-            )
-            self.user_context_label.setToolTip(
-                tr(
-                    "clinical_user_context_tooltip",
-                    self.language,
-                    project=project.project_name,
-                    username=username,
-                    dag=dag,
-                )
-            )
-        self.user_context_label.style().unpolish(self.user_context_label)
-        self.user_context_label.style().polish(self.user_context_label)
-
-    def current_project_token(self) -> RedcapProjectToken | None:
-        selected_project_id = self.runtime.settings.redcap.selected_project_id
-        if not selected_project_id:
-            return None
-        for project in self.runtime.settings.redcap.saved_project_tokens:
-            if project.project_id == str(selected_project_id):
-                return project
-        return None
 
     def populate_connection_project_combo(self) -> None:
         current_project_id = self.runtime.settings.redcap.selected_project_id
@@ -725,8 +681,12 @@ class ClinicalRedcapPage:
         self.validate_button.clicked.connect(self.validate_token)
         self.save_button = QPushButton(tr("clinical_save_connection", self.language))
         self.save_button.clicked.connect(self.save_connection)
+        self.remove_button = QPushButton(tr("redcap_remove_saved_token", self.language))
+        self.remove_button.setProperty("secondary", True)
+        self.remove_button.clicked.connect(self.remove_saved_project)
         buttons.addWidget(self.validate_button)
         buttons.addWidget(self.save_button)
+        buttons.addWidget(self.remove_button)
         buttons.addStretch(1)
         panel_layout.addLayout(buttons)
 
@@ -737,6 +697,7 @@ class ClinicalRedcapPage:
 
         layout.addWidget(panel)
         layout.addStretch(1)
+        self.refresh_remove_button()
 
     def get_api_url(self) -> str:
         return self.api_url_input.text().strip()
@@ -804,6 +765,9 @@ class ClinicalRedcapPage:
         settings.redcap.selected_project_id = project.project_id
         settings.redcap.selected_project_name = project.project_title
         settings.redcap.selected_project_token_secret_name = token_secret_name
+        replacing_existing = any(
+            item.project_id == project.project_id for item in settings.redcap.saved_project_tokens
+        )
         upsert_project_token(
             settings.redcap.saved_project_tokens,
             RedcapProjectToken(
@@ -820,7 +784,13 @@ class ClinicalRedcapPage:
         self.runtime.settings_store.save(settings)
         self.populate_saved_projects()
         self.update_selected_project_display()
-        self.status.setText(tr("redcap_project_saved", self.language, project=project.project_title))
+        self.status.setText(
+            tr(
+                "redcap_project_replaced" if replacing_existing else "redcap_project_saved",
+                self.language,
+                project=project.project_title,
+            )
+        )
         self.on_saved()
         try:
             config_path = ensure_project_config(
@@ -842,7 +812,13 @@ class ClinicalRedcapPage:
         settings.preferred_project_config_path = str(config_path)
         self.runtime.settings_store.save(settings)
         self.token_input.clear()
-        self.status.setText(tr("redcap_project_saved", self.language, project=project.project_title))
+        self.status.setText(
+            tr(
+                "redcap_project_replaced" if replacing_existing else "redcap_project_saved",
+                self.language,
+                project=project.project_title,
+            )
+        )
 
     def populate_saved_projects(self) -> None:
         self.saved_projects.blockSignals(True)
@@ -857,10 +833,13 @@ class ClinicalRedcapPage:
                 self.saved_projects.setCurrentIndex(index)
         self.saved_projects.blockSignals(False)
         self.update_selected_project_display()
+        self.refresh_remove_button()
 
     def update_selected_project_display(self) -> None:
         project_id = self.runtime.settings.redcap.selected_project_id
         if not project_id:
+            self.project_value.setText("-")
+            self.user_context_value.setText("-")
             return
         for project in self.runtime.settings.redcap.saved_project_tokens:
             if project.project_id != str(project_id):
@@ -889,6 +868,65 @@ class ClinicalRedcapPage:
             self.status.setText(tr("redcap_project_selected", self.language, project=project.project_name))
             self.on_saved()
             return
+
+    def remove_saved_project(self) -> None:
+        from PySide6.QtWidgets import QMessageBox
+
+        project = self.current_saved_project()
+        if project is None:
+            self.status.setText(tr("redcap_remove_no_saved_selection", self.language))
+            return
+        answer = QMessageBox.question(
+            self.widget,
+            tr("redcap_remove_saved_token", self.language),
+            tr("redcap_remove_saved_token_confirm", self.language, project=project.project_name),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+
+        settings = self.runtime.settings
+        settings.redcap.saved_project_tokens = [
+            item for item in settings.redcap.saved_project_tokens if item.project_id != project.project_id
+        ]
+        self.runtime.secrets_store.delete(project.token_secret_name)
+
+        replacement = settings.redcap.saved_project_tokens[0] if settings.redcap.saved_project_tokens else None
+        if replacement is not None:
+            settings.redcap.api_url = replacement.api_url
+            settings.redcap.selected_project_id = replacement.project_id
+            settings.redcap.selected_project_name = replacement.project_name
+            settings.redcap.selected_project_token_secret_name = replacement.token_secret_name
+        else:
+            configured_url = str(self.runtime.app_config.get("redcap", {}).get("api_url", "") or "").strip()
+            settings.redcap.api_url = configured_url or None
+            settings.redcap.selected_project_id = None
+            settings.redcap.selected_project_name = None
+            settings.redcap.selected_project_token_secret_name = None
+            settings.preferred_project_config_path = None
+
+        self.runtime.settings_store.save(settings)
+        self.validated_project = None
+        self.validated_user_context = None
+        self.token_input.clear()
+        self.populate_saved_projects()
+        self.update_selected_project_display()
+        self.status.setText(tr("redcap_project_removed", self.language, project=project.project_name))
+        self.on_saved()
+
+    def current_saved_project(self) -> RedcapProjectToken | None:
+        project_id = self.saved_projects.currentData()
+        if not project_id:
+            return None
+        for project in self.runtime.settings.redcap.saved_project_tokens:
+            if project.project_id == str(project_id):
+                return project
+        return None
+
+    def refresh_remove_button(self) -> None:
+        if hasattr(self, "remove_button"):
+            self.remove_button.setEnabled(self.current_saved_project() is not None)
 
 
 class ClinicalImportPage:
@@ -959,7 +997,17 @@ class ClinicalImportPage:
 
         self.project_status = QLabel("")
         self.project_status.setObjectName("StatusPill")
-        header_layout.addWidget(self.project_status)
+        self.project_status.setWordWrap(True)
+        self.project_user_context = QLabel("")
+        self.project_user_context.setObjectName("ProjectContextLabel")
+        self.project_user_context.setWordWrap(True)
+        project_status_group = QWidget()
+        project_status_layout = QVBoxLayout(project_status_group)
+        project_status_layout.setContentsMargins(0, 0, 0, 0)
+        project_status_layout.setSpacing(5)
+        project_status_layout.addWidget(self.project_status)
+        project_status_layout.addWidget(self.project_user_context)
+        header_layout.addWidget(project_status_group)
         layout.addWidget(header)
 
         source_row = QHBoxLayout()
@@ -990,11 +1038,20 @@ class ClinicalImportPage:
         if project:
             self.project_status.setObjectName("StatusPill")
             self.project_status.setText(tr("clinical_import_project_ready", self.language, project=project))
+            project_token = current_redcap_project_token(self.runtime.settings)
+            self.project_user_context.setText(
+                format_project_user_context(project_token, self.language)
+                if project_token is not None
+                else tr("clinical_user_context_missing", self.language)
+            )
         else:
             self.project_status.setObjectName("WarningPill")
             self.project_status.setText(tr("clinical_import_project_missing", self.language))
+            self.project_user_context.setText(tr("clinical_user_context_missing", self.language))
         self.project_status.style().unpolish(self.project_status)
         self.project_status.style().polish(self.project_status)
+        self.project_user_context.style().unpolish(self.project_user_context)
+        self.project_user_context.style().polish(self.project_user_context)
         self.refresh_document_status()
         self.refresh_excel_status()
         self.refresh_document_navigation()
@@ -1417,6 +1474,17 @@ def format_project_user_context(project: RedcapProjectToken, language: str) -> s
     username = project.username or tr("clinical_user_unknown", language)
     dag = project.data_access_group or project.data_access_group_unique_name or tr("clinical_dag_none", language)
     return tr("clinical_user_context", language, username=username, dag=dag)
+
+
+def current_redcap_project_token(settings: Any) -> RedcapProjectToken | None:
+    redcap = getattr(settings, "redcap", None)
+    selected_project_id = getattr(redcap, "selected_project_id", None)
+    if not selected_project_id:
+        return None
+    for project in getattr(redcap, "saved_project_tokens", []) or []:
+        if project.project_id == str(selected_project_id):
+            return project
+    return None
 
 
 def upsert_project_token(tokens: list[RedcapProjectToken], project: RedcapProjectToken) -> None:

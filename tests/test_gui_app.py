@@ -6,11 +6,17 @@ from unittest.mock import patch
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from gui.app import resolve_ui_mode
-from gui.clinical_main_window import ClinicalImportPage, ClinicalRedcapPage, build_default_llm_settings
+from gui.clinical_main_window import (
+    ClinicalImportPage,
+    ClinicalRedcapPage,
+    build_default_llm_settings,
+    current_redcap_project_token,
+    upsert_project_token,
+)
 from gui.workspace_page import fit_dialog_size_to_available_area
 from redcap_client import RedcapProject
 from secrets_store import SecretsStore
-from settings_store import AppSettings, SettingsStore
+from settings_store import AppSettings, RedcapProjectToken, SettingsStore
 
 
 def get_qapplication():
@@ -90,6 +96,56 @@ class GuiAppTests(unittest.TestCase):
         self.assertEqual(settings["gateway_client_token_secret_name"], "llm_gateway_client_token")
         self.assertNotIn("gateway_client_token", settings)
         self.assertNotIn("api_key", settings)
+
+    def test_upsert_project_token_replaces_same_project(self):
+        tokens = [
+            RedcapProjectToken(
+                api_url="https://redcap.example/api/",
+                project_id="42",
+                project_name="Old",
+                token_secret_name="old_secret",
+            )
+        ]
+
+        upsert_project_token(
+            tokens,
+            RedcapProjectToken(
+                api_url="https://redcap.example/api/",
+                project_id="42",
+                project_name="New",
+                token_secret_name="new_secret",
+                username="bahadir2",
+            ),
+        )
+
+        self.assertEqual(len(tokens), 1)
+        self.assertEqual(tokens[0].project_name, "New")
+        self.assertEqual(tokens[0].token_secret_name, "new_secret")
+        self.assertEqual(tokens[0].username, "bahadir2")
+
+    def test_current_redcap_project_token_uses_active_project(self):
+        settings = SimpleNamespace(
+            redcap=SimpleNamespace(
+                selected_project_id="43",
+                saved_project_tokens=[
+                    RedcapProjectToken(
+                        api_url="https://redcap.example/api/",
+                        project_id="42",
+                        project_name="A",
+                        token_secret_name="a",
+                    ),
+                    RedcapProjectToken(
+                        api_url="https://redcap.example/api/",
+                        project_id="43",
+                        project_name="B",
+                        token_secret_name="b",
+                        username="user-b",
+                    ),
+                ],
+            )
+        )
+
+        self.assertEqual(current_redcap_project_token(settings).username, "user-b")
 
     def test_clinical_import_page_gates_document_steps(self):
         get_qapplication()

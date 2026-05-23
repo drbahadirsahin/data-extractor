@@ -182,6 +182,12 @@ QLabel#UserContextPillMuted {
     font-weight: 650;
 }
 
+QLabel#ProjectContextLabel {
+    color: #607080;
+    font-size: 12px;
+    padding: 0 4px;
+}
+
 QPushButton {
     background: #0f766e;
     color: #ffffff;

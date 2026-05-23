@@ -322,7 +322,7 @@ class OnboardingPage:
         updated: list[RedcapProjectToken] = []
         replaced = False
         for existing in settings.redcap.saved_project_tokens:
-            if existing.project_id == project_token.project_id and existing.api_url == project_token.api_url:
+            if existing.project_id == project_token.project_id:
                 updated.append(project_token)
                 replaced = True
             else:

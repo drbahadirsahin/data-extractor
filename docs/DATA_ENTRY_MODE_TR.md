@@ -226,6 +226,29 @@ değişiklik olan kayıtları ezmeden conflict listesine alır.
 - Metadata dışında kalan lokal satırlar kaybolmaz, `__unknown__` form bölümünde
   gösterilebilir.
 
+## Metadata Form Renderer İskeleti
+
+`data_entry_form_model.py` REDCap metadata bilgisini renderer modeline çevirir:
+
+- `text`, `notes`, `dropdown`, `radio`, `checkbox`, `yesno`, `truefalse`,
+  `calc`, `descriptive` ve `sql` alan tipleri için başlangıç editör türü seçer.
+- `choices_options` veya raw choice metninden seçenek listesi oluşturur.
+- REDCap checkbox verisinin `field___code` şeklindeki lokal satırlarını tek
+  checkbox alanı olarak toparlar.
+- `required`, `branching_logic`, `text_validation`, min/max gibi metadata
+  bilgilerini UI modeline taşır. Branching logic henüz evaluate edilmiyor;
+  şimdilik görünür metadata olarak saklanıyor.
+
+`gui/data_entry_form.py` bu modeli gerçek PySide widget'larına dönüştüren ilk
+iskeleti sağlar. Değer toplama `collect_values()` ile REDCap flat payload'a yakın
+şekilde yapılır; checkbox alanları `field___code` anahtarları olarak döner.
+
+Lokal görsel deneme:
+
+```bash
+.venv/bin/python scripts/demo_data_entry_form.py
+```
+
 ## Geliştirme Sırası
 
 1. SQLite şema ve store testleri.

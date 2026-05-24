@@ -318,6 +318,50 @@ QListWidget#WizardQueueList {
     padding: 8px;
 }
 
+QWidget#DataEntryForm {
+    background: transparent;
+}
+
+QLabel#DataEntryRecordTitle {
+    color: #17202a;
+    font-size: 22px;
+    font-weight: 760;
+}
+
+QFrame#DataEntryFormSection {
+    background: #ffffff;
+    border: 1px solid #e0ded7;
+    border-radius: 8px;
+}
+
+QFrame#DataEntryFieldRow {
+    background: transparent;
+    border-bottom: 1px solid #f0eee8;
+    padding-bottom: 8px;
+}
+
+QLabel#DataEntryFieldLabel {
+    color: #18202a;
+    font-weight: 700;
+}
+
+QLabel#DataEntryFieldNote, QLabel#DataEntryBranchingLogic {
+    color: #607080;
+    font-size: 12px;
+}
+
+QLabel#DataEntryReadonlyValue {
+    background: #f8fafc;
+    color: #334155;
+    border: 1px solid #e0ded7;
+    border-radius: 7px;
+    padding: 9px 10px;
+}
+
+QFrame#DataEntryChoiceGroup {
+    background: transparent;
+}
+
 QHeaderView::section {
     background: #ebe7df;
     color: #334155;

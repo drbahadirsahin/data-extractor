@@ -16,6 +16,14 @@ class FieldSpec:
     text_validation: str | None = None
     text_validation_min: str | None = None
     text_validation_max: str | None = None
+    section_header: str | None = None
+    identifier: str | None = None
+    branching_logic: str | None = None
+    required: str | None = None
+    custom_alignment: str | None = None
+    question_number: str | None = None
+    matrix_group_name: str | None = None
+    matrix_ranking: str | None = None
     field_annotation: list[str] = field(default_factory=list)
     prompt_append: str | None = field(default_factory=str, init=False)
     cardinality: str | None = field(default="single", init=False, metadata={"choices": ["single", "multiple"]})
@@ -35,6 +43,14 @@ class FieldSpec:
             "text_validation": self.text_validation,
             "text_validation_min": self.text_validation_min,
             "text_validation_max": self.text_validation_max,
+            "section_header": self.section_header,
+            "identifier": self.identifier,
+            "branching_logic": self.branching_logic,
+            "required": self.required,
+            "custom_alignment": self.custom_alignment,
+            "question_number": self.question_number,
+            "matrix_group_name": self.matrix_group_name,
+            "matrix_ranking": self.matrix_ranking,
             "field_annotation": self.field_annotation,
             "prompt_append": self.prompt_append,
             "cardinality": self.cardinality,
@@ -65,7 +81,21 @@ class FieldSpec:
         self.choices_options = self.parse_choices(self.choices)
         for attribute in ["field_name", "form_name", "field_type", "field_label"]:
             setattr(self, attribute, coerce_required_metadata_text(getattr(self, attribute)))
-        for attribute in ["choices", "field_note", "text_validation", "text_validation_min", "text_validation_max"]:
+        for attribute in [
+            "choices",
+            "field_note",
+            "text_validation",
+            "text_validation_min",
+            "text_validation_max",
+            "section_header",
+            "identifier",
+            "branching_logic",
+            "required",
+            "custom_alignment",
+            "question_number",
+            "matrix_group_name",
+            "matrix_ranking",
+        ]:
             setattr(self, attribute, coerce_optional_metadata_text(getattr(self, attribute)))
 
         if self.field_annotation is None:
@@ -138,7 +168,7 @@ def filter_hidden_fields(fields_: list[FieldSpec]) -> list[FieldSpec]:
 
 def parse_field(config: ProjectConfig, field_data: dict[str, str | None]) -> FieldSpec:
     init_field_names = [f.name for f in fields(FieldSpec) if f.init]
-    field_data = {k: field_data[k] for k in init_field_names}
+    field_data = {k: field_data.get(k) for k in init_field_names}
     return FieldSpec(**field_data)
 
 

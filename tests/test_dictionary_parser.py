@@ -164,6 +164,53 @@ class DictionaryParserTests(unittest.TestCase):
 
             self.assertEqual(field_names, {"hasta_ad"})
 
+    def test_required_and_branching_metadata_are_preserved(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            csv_path = Path(temp_dir) / "dictionary.csv"
+            headers = [
+                "Field Label",
+                "Variable / Field Name",
+                "Field Type",
+                "Form Name",
+                "Branching Logic (Show field only if...)",
+                "Required Field?",
+            ]
+            rows = [
+                {
+                    "Field Label": "PSA",
+                    "Variable / Field Name": "psa",
+                    "Field Type": "text",
+                    "Form Name": "labs",
+                    "Branching Logic (Show field only if...)": "[has_psa] = '1'",
+                    "Required Field?": "y",
+                }
+            ]
+            with csv_path.open("w", encoding="utf-8", newline="") as handle:
+                writer = csv.DictWriter(handle, fieldnames=headers)
+                writer.writeheader()
+                writer.writerows(rows)
+
+            config = ProjectConfig(
+                project_name="Test",
+                dictionary_path=str(csv_path),
+                target_forms=["labs"],
+                target_fields=[],
+                dictionary_legend={
+                    "field_name": "Variable / Field Name",
+                    "form_name": "Form Name",
+                    "field_type": "Field Type",
+                    "field_label": "Field Label",
+                    "branching_logic": "Branching Logic (Show field only if...)",
+                    "required": "Required Field?",
+                },
+            )
+
+            grouped = load_data_dictionary(config)
+            field = grouped["labs"][0]
+
+            self.assertEqual(field.required, "y")
+            self.assertEqual(field.branching_logic, "[has_psa] = '1'")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -72,6 +72,64 @@ class GuiDataEntryPageTests(unittest.TestCase):
             self.assertEqual(pending[0]["field_name"], "hasta_ad")
             self.assertEqual(pending[0]["new_value"], "EF")
 
+    def test_page_shows_project_context_and_dag_switcher(self) -> None:
+        get_qapplication()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app_home = Path(temp_dir)
+            config_path = write_project_config(app_home)
+            runtime = build_runtime(app_home, config_path)
+            runtime.settings.redcap.saved_project_tokens[0].username = "bahadir2"
+            runtime.settings.redcap.saved_project_tokens[0].data_access_group = "Marmara"
+            runtime.settings.redcap.saved_project_tokens[0].data_access_group_unique_name = "marmara"
+            runtime.settings.redcap.saved_project_tokens[0].can_switch_data_access_group = True
+            runtime.settings.redcap.saved_project_tokens[0].available_data_access_groups = [
+                {
+                    "data_access_group_id": "42",
+                    "data_access_group": "Marmara",
+                    "data_access_group_unique_name": "marmara",
+                    "active": True,
+                    "switchable": True,
+                    "no_assignment": False,
+                },
+                {
+                    "data_access_group_id": "43",
+                    "data_access_group": "Pendik",
+                    "data_access_group_unique_name": "pendik",
+                    "active": False,
+                    "switchable": True,
+                    "no_assignment": False,
+                },
+            ]
+
+            page = ClinicalDataEntryPage(runtime)
+
+            self.assertIn("bahadir2", page.project_user_context.text())
+            self.assertIn("Marmara", page.project_user_context.text())
+            self.assertFalse(page.dag_combo.isHidden())
+            self.assertEqual(page.dag_combo.count(), 2)
+
+    def test_new_record_opens_blank_metadata_form_and_queues_changes(self) -> None:
+        get_qapplication()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app_home = Path(temp_dir)
+            config_path = write_project_config(app_home)
+            store = DataEntryStore(data_entry_store_path(app_home))
+            store.initialize()
+            runtime = build_runtime(app_home, config_path)
+            page = ClinicalDataEntryPage(runtime)
+
+            page.open_new_record("99")
+            self.assertIsNotNone(page.current_model)
+            self.assertEqual(page.current_model.record, "99")
+            page.form_widget.editor_widgets["hasta_ad"].setText("Yeni")
+            page.save_current_record()
+
+            pending = store.pending_changes("17")
+            self.assertEqual(len(pending), 1)
+            self.assertEqual(pending[0]["record"], "99")
+            self.assertEqual(pending[0]["field_name"], "hasta_ad")
+            self.assertEqual(pending[0]["new_value"], "Yeni")
+
     def test_page_requires_active_redcap_project(self) -> None:
         get_qapplication()
         with tempfile.TemporaryDirectory() as temp_dir:

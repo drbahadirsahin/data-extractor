@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from PySide6.QtCore import QObject, Qt, QThread, Signal, Slot
 
-from data_entry_browser import DataEntryRecordBrowser
+from data_entry_browser import DataEntryRecordBrowser, RecordDetail
 from data_entry_form_changes import apply_form_changes
 from data_entry_form_model import build_form_render_model
 from data_entry_store import DataEntryStore
@@ -42,13 +43,15 @@ class DataEntrySyncWorker(QObject):
 
 
 class ClinicalDataEntryPage:
-    def __init__(self, runtime: Any) -> None:
+    def __init__(self, runtime: Any, *, change_dag: Callable[[dict[str, Any]], None] | None = None) -> None:
         from PySide6.QtWidgets import (
+            QComboBox,
             QFrame,
             QHBoxLayout,
             QLabel,
             QLineEdit,
             QListWidget,
+            QProgressBar,
             QPushButton,
             QScrollArea,
             QSplitter,
@@ -58,6 +61,7 @@ class ClinicalDataEntryPage:
 
         self.runtime = runtime
         self.language = runtime.settings.ui.language
+        self.change_dag = change_dag
         self.store = DataEntryStore(data_entry_store_path(runtime.app_home))
         self.browser = DataEntryRecordBrowser(self.store)
         self.bundle: WorkspaceBundle | None = None
@@ -88,23 +92,52 @@ class ClinicalDataEntryPage:
         self.project_status = QLabel("")
         self.project_status.setObjectName("StatusPill")
         self.project_status.setWordWrap(True)
-        header_layout.addWidget(self.project_status)
+        self.project_user_context = QLabel("")
+        self.project_user_context.setObjectName("ProjectContextLabel")
+        self.project_user_context.setWordWrap(True)
+        self.dag_combo = QComboBox()
+        self.dag_combo.setObjectName("DagSwitchCombo")
+        self.dag_combo.setMinimumWidth(180)
+        self.dag_combo.currentIndexChanged.connect(self.on_dag_changed)
+        project_status_group = QWidget()
+        project_status_layout = QVBoxLayout(project_status_group)
+        project_status_layout.setContentsMargins(0, 0, 0, 0)
+        project_status_layout.setSpacing(5)
+        project_status_layout.addWidget(self.project_status)
+        project_status_layout.addWidget(self.project_user_context)
+        project_status_layout.addWidget(self.dag_combo)
+        header_layout.addWidget(project_status_group)
         layout.addWidget(header)
 
         toolbar = QHBoxLayout()
         toolbar.setSpacing(10)
         self.sync_button = QPushButton(tr("data_entry_sync", self.language))
-        self.sync_button.clicked.connect(self.start_sync)
+        self.sync_button.clicked.connect(lambda: self.start_sync())
         self.refresh_button = QPushButton(tr("data_entry_refresh", self.language))
         self.refresh_button.setProperty("secondary", True)
         self.refresh_button.clicked.connect(self.refresh_records)
+        self.new_record_button = QPushButton(tr("data_entry_new_record", self.language))
+        self.new_record_button.setProperty("secondary", True)
+        self.new_record_button.clicked.connect(lambda: self.open_new_record())
         self.search_input = QLineEdit("")
         self.search_input.setPlaceholderText(tr("data_entry_search_placeholder", self.language))
         self.search_input.returnPressed.connect(self.refresh_records)
         toolbar.addWidget(self.sync_button)
         toolbar.addWidget(self.refresh_button)
+        toolbar.addWidget(self.new_record_button)
         toolbar.addWidget(self.search_input, 1)
         layout.addLayout(toolbar)
+
+        self.sync_progress = QProgressBar()
+        self.sync_progress.setRange(0, 0)
+        self.sync_progress.setTextVisible(False)
+        self.sync_progress.setVisible(False)
+        layout.addWidget(self.sync_progress)
+
+        self.status_label = QLabel("")
+        self.status_label.setObjectName("MutedLabel")
+        self.status_label.setWordWrap(True)
+        layout.addWidget(self.status_label)
 
         splitter = QSplitter()
         splitter.setOrientation(Qt.Orientation.Horizontal)
@@ -131,30 +164,40 @@ class ClinicalDataEntryPage:
         splitter.setStretchFactor(1, 1)
         layout.addWidget(splitter, 1)
 
-        self.status_label = QLabel("")
-        self.status_label.setObjectName("MutedLabel")
-        self.status_label.setWordWrap(True)
-        layout.addWidget(self.status_label)
-
         self.refresh_project_state()
 
+    def on_dag_changed(self) -> None:
+        option = self.dag_combo.currentData()
+        if self.change_dag is None or not isinstance(option, dict) or option.get("active") or not option.get("switchable"):
+            return
+        self.change_dag(option)
+
     def refresh_project_state(self) -> None:
+        from gui.clinical_main_window import configure_dag_switch_combo, format_project_user_context
+
         project = current_redcap_project_token(self.runtime.settings)
         if project is None:
             self.project_status.setObjectName("WarningPill")
             self.project_status.setText(tr("data_entry_project_missing", self.language))
+            self.project_user_context.setText(tr("clinical_user_context_missing", self.language))
             self.sync_button.setEnabled(False)
             self.refresh_button.setEnabled(False)
+            self.new_record_button.setEnabled(False)
             self.save_button.setEnabled(False)
             self.record_list.clear()
             self.status_label.setText(tr("data_entry_connect_first", self.language))
         else:
             self.project_status.setObjectName("StatusPill")
             self.project_status.setText(tr("data_entry_project_ready", self.language, project=project.project_name))
+            self.project_user_context.setText(format_project_user_context(project, self.language))
             self.sync_button.setEnabled(self._sync_thread is None)
             self.refresh_button.setEnabled(True)
+            self.new_record_button.setEnabled(True)
+        configure_dag_switch_combo(self.dag_combo, project, self.language)
         self.project_status.style().unpolish(self.project_status)
         self.project_status.style().polish(self.project_status)
+        self.project_user_context.style().unpolish(self.project_user_context)
+        self.project_user_context.style().polish(self.project_user_context)
         self.bundle = self.load_active_bundle()
         self.refresh_records()
 
@@ -240,6 +283,48 @@ class ClinicalDataEntryPage:
         self.save_button.setEnabled(True)
         self.status_label.setText(tr("data_entry_record_opened", self.language, record=record))
 
+    def open_new_record(self, record_id: str | None = None) -> None:
+        from PySide6.QtWidgets import QInputDialog
+
+        project = current_redcap_project_token(self.runtime.settings)
+        if project is None:
+            self.status_label.setText(tr("data_entry_connect_first", self.language))
+            return
+        if self.bundle is None:
+            self.bundle = self.load_active_bundle()
+        if self.bundle is None:
+            self.status_label.setText(tr("data_entry_metadata_missing", self.language))
+            return
+        if record_id is None:
+            entered, ok = QInputDialog.getText(
+                self.widget,
+                tr("data_entry_new_record_title", self.language),
+                tr("data_entry_new_record_label", self.language),
+            )
+            if not ok:
+                return
+            record_id = entered
+        record_id = str(record_id or "").strip()
+        if not record_id:
+            self.status_label.setText(tr("data_entry_new_record_missing", self.language))
+            return
+        detail = RecordDetail(
+            project_id=project.project_id,
+            record=record_id,
+            dag_unique_name=project.data_access_group_unique_name,
+            dirty=True,
+        )
+        self.current_model = build_form_render_model(
+            detail,
+            self.bundle.grouped_fields,
+            form_labels=self.bundle.config.form_labels,
+            title=tr("data_entry_record_title", self.language, record=record_id),
+        )
+        self.form_widget.set_model(self.current_model)
+        self.record_list.clearSelection()
+        self.save_button.setEnabled(True)
+        self.status_label.setText(tr("data_entry_new_record_ready", self.language, record=record_id))
+
     def save_current_record(self) -> None:
         if self.current_model is None:
             return
@@ -256,18 +341,22 @@ class ClinicalDataEntryPage:
         select_record_in_list(self.record_list, current_record)
         self.status_label.setText(tr("data_entry_changes_queued", self.language, count=result.queued_count))
 
-    def start_sync(self) -> None:
+    def start_sync(self, *, auto: bool = False) -> bool:
         project = current_redcap_project_token(self.runtime.settings)
         if project is None:
-            self.status_label.setText(tr("data_entry_connect_first", self.language))
-            return
+            if not auto:
+                self.status_label.setText(tr("data_entry_connect_first", self.language))
+            return False
         token = self.runtime.secrets_store.get(project.token_secret_name)
         if not token:
             self.status_label.setText(tr("data_entry_missing_token", self.language))
-            return
+            return False
         if self._sync_thread is not None:
-            return
+            return False
+        logging.info("Data-entry sync started: project_id=%s auto=%s", project.project_id, auto)
         self.sync_button.setEnabled(False)
+        self.refresh_button.setEnabled(False)
+        self.sync_progress.setVisible(True)
         self.status_label.setText(tr("data_entry_sync_running", self.language))
         thread = QThread(self.widget)
         worker = DataEntrySyncWorker(
@@ -288,15 +377,25 @@ class ClinicalDataEntryPage:
         thread.finished.connect(thread.deleteLater)
         thread.finished.connect(self.cleanup_sync_thread, Qt.ConnectionType.QueuedConnection)
         thread.start()
+        return True
 
     @Slot(object)
     def handle_sync_success(self, report: Any) -> None:
+        logging.info(
+            "Data-entry sync finished: project_id=%s pulled=%s conflicts=%s values=%s hashes=%s",
+            getattr(report, "project_id", None),
+            len(getattr(report, "pulled_records", []) or []),
+            len(getattr(report, "conflict_records", []) or []),
+            getattr(report, "values_updated", 0),
+            getattr(report, "identity_hashes_updated", 0),
+        )
         self.status_label.setText(
             tr(
                 "data_entry_sync_done",
                 self.language,
                 pulled=len(getattr(report, "pulled_records", []) or []),
                 conflicts=len(getattr(report, "conflict_records", []) or []),
+                values=getattr(report, "values_updated", 0),
                 hashes=getattr(report, "identity_hashes_updated", 0),
             )
         )
@@ -304,13 +403,16 @@ class ClinicalDataEntryPage:
 
     @Slot(str)
     def handle_sync_failure(self, error: str) -> None:
+        logging.info("Data-entry sync failed: %s", error)
         self.status_label.setText(tr("data_entry_sync_failed", self.language, error=error))
 
     @Slot()
     def cleanup_sync_thread(self) -> None:
         self._sync_thread = None
         self._sync_worker = None
+        self.sync_progress.setVisible(False)
         self.sync_button.setEnabled(current_redcap_project_token(self.runtime.settings) is not None)
+        self.refresh_button.setEnabled(current_redcap_project_token(self.runtime.settings) is not None)
 
 
 def data_entry_store_path(app_home: str | Path) -> Path:

@@ -131,7 +131,7 @@ class ClinicalMainWindow:
             change_dag=self.change_active_dag,
         )
         self.redcap_page = ClinicalRedcapPage(runtime=runtime, on_saved=self.after_redcap_saved)
-        self.data_entry_page = ClinicalDataEntryPage(runtime)
+        self.data_entry_page = ClinicalDataEntryPage(runtime, change_dag=self.change_active_dag)
         self.import_page = ClinicalImportPage(
             runtime=runtime,
             add_patient_documents=self.workspace_page.add_patient_documents_to_queue,
@@ -253,11 +253,13 @@ class ClinicalMainWindow:
             self.home_page.refresh()
             self.import_page.refresh()
             self.data_entry_page.refresh_project_state()
+            self.data_entry_page.start_sync(auto=True)
             return
 
     def after_redcap_saved(self) -> None:
         self.workspace_page.refresh_redcap_projects()
         self.refresh_connection_state()
+        self.data_entry_page.start_sync(auto=True)
         self.set_page("import")
 
     def refresh_project_user_context(self, project: RedcapProjectToken | None = None) -> bool:
@@ -943,7 +945,6 @@ class ClinicalRedcapPage:
                 project=project.project_title,
             )
         )
-        self.on_saved()
         try:
             config_path = ensure_project_config(
                 app_home=self.runtime.app_home,
@@ -971,6 +972,7 @@ class ClinicalRedcapPage:
                 project=project.project_title,
             )
         )
+        self.on_saved()
 
     def populate_saved_projects(self) -> None:
         self.saved_projects.blockSignals(True)

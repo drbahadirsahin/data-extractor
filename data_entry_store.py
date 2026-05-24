@@ -350,6 +350,38 @@ class DataEntryStore:
                     conflict=False,
                 )
 
+    def upsert_remote_manifest(self, manifest: Iterable[RemoteRecordManifest]) -> None:
+        synced_at = utc_now()
+        with self.connect() as db:
+            for item in manifest:
+                self._upsert_record_sync_state(
+                    db,
+                    project_id=str(item.project_id),
+                    record=str(item.record),
+                    dag_unique_name=item.dag_unique_name,
+                    remote_updated_at=item.remote_updated_at,
+                    local_updated_at=synced_at,
+                    last_synced_at=synced_at,
+                    dirty=False,
+                    conflict=False,
+                )
+
+    def mark_record_conflicts(
+        self,
+        *,
+        project_id: str,
+        records: Iterable[str],
+        conflict: bool = True,
+    ) -> None:
+        with self.connect() as db:
+            for record in records:
+                self._upsert_record_sync_state(
+                    db,
+                    project_id=str(project_id),
+                    record=str(record),
+                    conflict=conflict,
+                )
+
     def redcap_data_rows(self, project_id: str, record: str | None = None) -> list[dict[str, Any]]:
         query = """
             SELECT project_id, event_id, record, field_name, value, instance

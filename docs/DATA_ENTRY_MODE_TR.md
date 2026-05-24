@@ -209,6 +209,11 @@ Kurallar:
 
 İlk SQLite iskeleti `compare_remote_manifest()` ile bu ayrımı yapmaya başladı.
 
+`DataEntrySyncService.sync_read_only()` ilk çalışan senkronizasyon katmanı olarak
+bu mantığı uygular: manifesti alır, yalnızca çekilmesi gereken kayıtlar için
+`get-record-data` çağırır, TC hash eşlemesini günceller ve yerelde bekleyen
+değişiklik olan kayıtları ezmeden conflict listesine alır.
+
 ## Geliştirme Sırası
 
 1. SQLite şema ve store testleri.

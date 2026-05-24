@@ -74,37 +74,36 @@ Bu tablo şu amaçlarla kullanılacak:
 
 ## Dynamic SQL Alanları
 
-Dynamic Query / SQL alanları için iki katmanlı yaklaşım önerilir:
+Dynamic Query / SQL alanlarında öncelik lokal çözümleme olmalıdır. REDCap data dictionary içindeki pek çok SQL alanı doğrudan `redcap_data` tablosunu kullanır. Lokal SQLite cache aynı kolonları `redcap_data` view'ı ile sağladığı için bu alanlar server'a gitmeden çözülebilir.
 
-1. Basit SQL'ler lokal `redcap_data` view'ı üzerinden çözülebilir.
-2. REDCap'e özel fonksiyon, user/DAG context, permission veya karmaşık join gerektiren SQL'ler serverdaki external module endpoint'i ile çözümlenmelidir.
+İlk lokal çözümleyici `dynamic_sql.py` içinde oluşturuldu. Desteklenen başlangıç kapsamı:
 
-Önerilen server endpoint:
+- Sadece `SELECT` sorguları.
+- Sadece `redcap_data` üzerinden okuma.
+- `[record-name]` placeholder'ını parametreli sorguya çevirme.
+- MySQL `CONCAT(...)` fonksiyonu.
+- MySQL `IF(condition, true, false)` fonksiyonu.
+- MySQL `GROUP_CONCAT(expr SEPARATOR ' | ')` sözdizimini SQLite `GROUP_CONCAT(expr, ' | ')` biçimine çevirme.
+- `CASE WHEN` ifadeleri SQLite tarafından zaten desteklenir.
 
-```text
-content=externalModule
-prefix=tc_hash
-action=get-dynamic-query-options
-field_name=...
-record=...
-event_id=...
-instance=...
-format=json
-returnFormat=json
+Bu yaklaşım aşağıdaki örnekleri lokal çalıştırmayı hedefler:
+
+```sql
+select value
+from redcap_data
+where project_id=16
+  and field_name='mr_trus_bx_tarihi'
+  and record=[record-name]
 ```
 
-Response önerisi:
+ve `GROUP_CONCAT`, `CONCAT`, `IF`, `CASE WHEN` kullanan MR lezyon seçimi gibi daha karmaşık sorgular.
 
-```json
-{
-  "field_name": "mr_tarih_secimi",
-  "record": "12",
-  "options": [
-    {"value": "2026-01-02", "label": "2026-01-02"}
-  ],
-  "context_hash": "..."
-}
-```
+Server tarafında `get-dynamic-query-options` endpoint'i şimdilik zorunlu değildir. Ancak aşağıdaki durumlarda opsiyonel fallback olarak tekrar değerlendirilebilir:
+
+- SQL `redcap_data` dışındaki REDCap tablolarına ihtiyaç duyarsa.
+- REDCap/PHP/MySQL'e özel fonksiyonlar lokal SQLite'a güvenli çevrilemezse.
+- Sorgu kullanıcı yetkisi, DAG context veya server-only business rule gerektirirse.
+- Dynamic query sonucu server tarafında hesaplanan transient bir değere bağlıysa.
 
 ## Gerekli External Module Endpointleri
 
@@ -176,10 +175,6 @@ Aktif token/DAG için `tc_hash -> record` eşlemesini döndürür.
 }
 ```
 
-### `get-dynamic-query-options`
-
-Dynamic SQL alanlarını server context'iyle çözer.
-
 ### `submit-record-changes`
 
 İlk aşamada mevcut REDCap API import kullanılabilir. Ancak conflict kontrolünü ve server-side validation özetini tek noktadan almak için ileride external module üzerinden batch değişiklik endpoint'i daha iyi olabilir.
@@ -209,4 +204,4 @@ Kurallar:
 5. REDCap metadata'dan form renderer.
 6. Manual edit -> pending changes.
 7. Submit + conflict resolver.
-8. Dynamic SQL seçenek çözümleyici.
+8. Dynamic SQL seçenek çözümleyicisini gerçek proje SQL örnekleriyle genişletme.

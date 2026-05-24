@@ -214,6 +214,18 @@ bu mantığı uygular: manifesti alır, yalnızca çekilmesi gereken kayıtlar i
 `get-record-data` çağırır, TC hash eşlemesini günceller ve yerelde bekleyen
 değişiklik olan kayıtları ezmeden conflict listesine alır.
 
+## Read-Only Kayıt Tarayıcı
+
+`DataEntryRecordBrowser` lokal cache'i UI dostu modellere dönüştürür:
+
+- Kayıt listesi: record id, opsiyonel kullanıcı etiketi, DAG, value/hash sayısı,
+  dirty/conflict ve pending change sayısı.
+- Arama: record id, alan değerleri ve lokal hash eşlemesi üzerinden.
+- Kayıt detayı: metadata verildiğinde form sırasına göre gruplanmış alanlar;
+  metadata'da olan ama değeri olmayan alanlar boş/present=false olarak döner.
+- Metadata dışında kalan lokal satırlar kaybolmaz, `__unknown__` form bölümünde
+  gösterilebilir.
+
 ## Geliştirme Sırası
 
 1. SQLite şema ve store testleri.

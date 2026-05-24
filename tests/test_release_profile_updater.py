@@ -77,6 +77,7 @@ class ReleaseProfileUpdaterTests(unittest.TestCase):
         self.assertTrue(version_is_newer("0.1.1-early.22", "0.1.1-early.21"))
         self.assertTrue(version_is_newer("0.1.1-early.23", "0.1.1-early.22"))
         self.assertTrue(version_is_newer("0.1.1-early.24", "0.1.1-early.23"))
+        self.assertTrue(version_is_newer("0.1.1-early.25", "0.1.1-early.24"))
 
     def test_cache_busted_url_preserves_existing_query(self):
         with patch("updater.time.time", return_value=1234.567):

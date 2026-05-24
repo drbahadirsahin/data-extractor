@@ -1,6 +1,6 @@
 {
   "release": {
-    "version": "0.1.1-early.24",
+    "version": "0.1.1-early.25",
     "profile": "user",
     "channel": "early",
     "updates": {
@@ -50,7 +50,8 @@
   "redcap_user_context": {
     "enabled": true,
     "prefix": "tc_hash",
-    "action": "get-api-user-context"
+    "action": "get-api-user-context",
+    "set_dag_action": "set-api-user-dag"
   },
   "ui": {
     "mode": "clinical"

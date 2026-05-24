@@ -20,10 +20,34 @@ class RedcapProject:
 @dataclass
 class RedcapUserContext:
     username: str | None = None
+    data_access_group_id: str | None = None
     data_access_group: str | None = None
     data_access_group_unique_name: str | None = None
+    data_access_group_is_assigned: bool | None = None
+    records_created_without_data_access_group: bool | None = None
+    can_manage_data_access_groups: bool | None = None
+    dag_switch_source: str | None = None
+    has_multiple_data_access_groups: bool | None = None
+    has_multiple_assigned_data_access_groups: bool | None = None
+    can_switch_data_access_group: bool | None = None
+    assigned_data_access_group_count: int | None = None
+    available_data_access_group_count: int | None = None
+    project_data_access_group_count: int | None = None
+    assigned_data_access_groups: list["RedcapDataAccessGroup"] | None = None
+    available_data_access_groups: list["RedcapDataAccessGroup"] | None = None
+    project_data_access_groups: list["RedcapDataAccessGroup"] | None = None
     api_import: bool | None = None
     api_export: bool | None = None
+
+
+@dataclass
+class RedcapDataAccessGroup:
+    data_access_group_id: str | None = None
+    data_access_group: str | None = None
+    data_access_group_unique_name: str | None = None
+    active: bool = False
+    switchable: bool = False
+    no_assignment: bool = False
 
 
 @dataclass
@@ -31,10 +55,15 @@ class RedcapUserContextModuleConfig:
     enabled: bool = False
     prefix: str = "tc_hash"
     action: str = "get-api-user-context"
+    set_dag_action: str = "set-api-user-dag"
 
     @property
     def can_request(self) -> bool:
         return bool(self.enabled and self.prefix.strip() and self.action.strip())
+
+    @property
+    def can_set_dag(self) -> bool:
+        return bool(self.enabled and self.prefix.strip() and self.set_dag_action.strip())
 
 
 class RedcapAPIError(RuntimeError):
@@ -180,6 +209,34 @@ class RedcapClient:
         response = self._post_form(payload)
         return parse_external_module_user_context_response(response)
 
+    def set_external_module_user_dag(
+        self,
+        *,
+        prefix: str = "tc_hash",
+        action: str = "set-api-user-dag",
+        data_access_group_unique_name: str | None = None,
+        dag_group_id: str | None = None,
+        data_access_group: str | None = None,
+    ) -> RedcapUserContext:
+        payload = {
+            "token": self.api_token,
+            "content": "externalModule",
+            "prefix": prefix,
+            "action": action,
+            "format": "json",
+            "returnFormat": "json",
+        }
+        if data_access_group_unique_name not in {None, ""}:
+            payload["data_access_group_unique_name"] = str(data_access_group_unique_name)
+        elif dag_group_id not in {None, ""}:
+            payload["dag_group_id"] = str(dag_group_id or "0")
+        elif data_access_group not in {None, ""}:
+            payload["data_access_group"] = str(data_access_group)
+        else:
+            payload["dag_group_id"] = "0"
+        response = self._post_form(payload)
+        return parse_external_module_user_context_response(response)
+
     def import_records(
         self,
         records: list[dict[str, Any]],
@@ -278,6 +335,15 @@ def coerce_optional_text(value: Any) -> str | None:
     return text or None
 
 
+def coerce_optional_int(value: Any) -> int | None:
+    if value in {None, ""}:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def load_redcap_user_context_module_config(app_config: dict[str, Any]) -> RedcapUserContextModuleConfig:
     payload = app_config.get("redcap_user_context", {}) if isinstance(app_config, dict) else {}
     if not isinstance(payload, dict):
@@ -286,6 +352,7 @@ def load_redcap_user_context_module_config(app_config: dict[str, Any]) -> Redcap
         enabled=bool(payload.get("enabled", False)),
         prefix=str(payload.get("prefix", "tc_hash") or "tc_hash"),
         action=str(payload.get("action", "get-api-user-context") or "get-api-user-context"),
+        set_dag_action=str(payload.get("set_dag_action", "set-api-user-dag") or "set-api-user-dag"),
     )
 
 
@@ -487,6 +554,8 @@ def parse_external_module_user_context_response(response: str) -> RedcapUserCont
     else:
         parsed_form = parse.parse_qs(stripped, keep_blank_values=True)
         raw = {key: values[0] if values else "" for key, values in parsed_form.items()}
+    if isinstance(raw, dict) and raw.get("error") not in {None, ""}:
+        raise RedcapAPIError(str(raw.get("error")))
     return user_context_from_external_module_payload(raw)
 
 
@@ -515,10 +584,39 @@ def has_redcap_user_context_value(context: RedcapUserContext | None) -> bool:
     return any(
         [
             context.username,
+            context.data_access_group_id,
             context.data_access_group,
             context.data_access_group_unique_name,
         ]
     )
+
+
+def parse_data_access_groups(value: Any) -> list[RedcapDataAccessGroup]:
+    if not isinstance(value, list):
+        return []
+    parsed: list[RedcapDataAccessGroup] = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        parsed.append(
+            RedcapDataAccessGroup(
+                data_access_group_id=coerce_optional_text(
+                    item.get("data_access_group_id") or item.get("dag_group_id") or item.get("group_id")
+                ),
+                data_access_group=coerce_optional_text(
+                    item.get("data_access_group") or item.get("group_name") or item.get("dag")
+                ),
+                data_access_group_unique_name=coerce_optional_text(
+                    item.get("data_access_group_unique_name")
+                    or item.get("unique_group_name")
+                    or item.get("dag_unique_name")
+                ),
+                active=coerce_optional_bool(item.get("active")) is True,
+                switchable=coerce_optional_bool(item.get("switchable")) is True,
+                no_assignment=coerce_optional_bool(item.get("no_assignment")) is True,
+            )
+        )
+    return parsed
 
 
 def parse_form_event_mapping_response(response: str) -> dict[str, list[str]]:
@@ -573,6 +671,9 @@ def build_user_context(row: dict[str, Any]) -> RedcapUserContext:
     username = coerce_optional_text(
         row.get("username") or row.get("user") or row.get("redcap_user") or row.get("user_name")
     )
+    dag_id = coerce_optional_text(
+        row.get("data_access_group_id") or row.get("dag_group_id") or row.get("group_id")
+    )
     dag_label = coerce_optional_text(
         row.get("data_access_group")
         or row.get("redcap_data_access_group")
@@ -590,8 +691,26 @@ def build_user_context(row: dict[str, Any]) -> RedcapUserContext:
     )
     return RedcapUserContext(
         username=username,
+        data_access_group_id=dag_id,
         data_access_group=dag_label,
         data_access_group_unique_name=dag_unique,
+        data_access_group_is_assigned=coerce_optional_bool(row.get("data_access_group_is_assigned")),
+        records_created_without_data_access_group=coerce_optional_bool(
+            row.get("records_created_without_data_access_group")
+        ),
+        can_manage_data_access_groups=coerce_optional_bool(row.get("can_manage_data_access_groups")),
+        dag_switch_source=coerce_optional_text(row.get("dag_switch_source")),
+        has_multiple_data_access_groups=coerce_optional_bool(row.get("has_multiple_data_access_groups")),
+        has_multiple_assigned_data_access_groups=coerce_optional_bool(
+            row.get("has_multiple_assigned_data_access_groups")
+        ),
+        can_switch_data_access_group=coerce_optional_bool(row.get("can_switch_data_access_group")),
+        assigned_data_access_group_count=coerce_optional_int(row.get("assigned_data_access_group_count")),
+        available_data_access_group_count=coerce_optional_int(row.get("available_data_access_group_count")),
+        project_data_access_group_count=coerce_optional_int(row.get("project_data_access_group_count")),
+        assigned_data_access_groups=parse_data_access_groups(row.get("assigned_data_access_groups")),
+        available_data_access_groups=parse_data_access_groups(row.get("available_data_access_groups")),
+        project_data_access_groups=parse_data_access_groups(row.get("project_data_access_groups")),
         api_import=coerce_optional_bool(row.get("api_import")),
         api_export=coerce_optional_bool(row.get("api_export")),
     )

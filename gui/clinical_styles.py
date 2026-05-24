@@ -278,6 +278,17 @@ QComboBox#SidebarProjectCombo:disabled {
     border: 1px solid #f1cf9d;
 }
 
+QComboBox#DagSwitchCombo {
+    background: #ffffff;
+    color: #20303b;
+    border: 1px solid #b7ded5;
+    border-radius: 8px;
+    padding: 6px 9px;
+    min-height: 22px;
+    font-size: 12px;
+    font-weight: 650;
+}
+
 QListWidget, QPlainTextEdit, QTableWidget {
     background: #ffffff;
     border: 1px solid #ded8cd;

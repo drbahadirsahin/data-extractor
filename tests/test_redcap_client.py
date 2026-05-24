@@ -179,6 +179,7 @@ class RedcapClientTests(unittest.TestCase):
                     "enabled": True,
                     "prefix": "tc_hash",
                     "action": "get-api-user-context",
+                    "set_dag_action": "set-api-user-dag",
                 }
             }
         )
@@ -186,6 +187,8 @@ class RedcapClientTests(unittest.TestCase):
         self.assertTrue(config.can_request)
         self.assertEqual(config.prefix, "tc_hash")
         self.assertEqual(config.action, "get-api-user-context")
+        self.assertTrue(config.can_set_dag)
+        self.assertEqual(config.set_dag_action, "set-api-user-dag")
 
     def test_parse_external_module_user_context_response(self) -> None:
         context = parse_external_module_user_context_response(
@@ -194,8 +197,28 @@ class RedcapClientTests(unittest.TestCase):
                     "ok": True,
                     "project_id": "17",
                     "username": "bahadir2",
+                    "data_access_group_id": "42",
                     "data_access_group": "Marmara",
                     "data_access_group_unique_name": "marmara",
+                    "can_switch_data_access_group": True,
+                    "available_data_access_groups": [
+                        {
+                            "data_access_group_id": "42",
+                            "data_access_group": "Marmara",
+                            "data_access_group_unique_name": "marmara",
+                            "active": True,
+                            "switchable": True,
+                            "no_assignment": False,
+                        },
+                        {
+                            "data_access_group_id": "43",
+                            "data_access_group": "Pendik",
+                            "data_access_group_unique_name": "pendik",
+                            "active": False,
+                            "switchable": True,
+                            "no_assignment": False,
+                        },
+                    ],
                     "api_import": True,
                     "api_export": "1",
                 }
@@ -203,8 +226,13 @@ class RedcapClientTests(unittest.TestCase):
         )
 
         self.assertEqual(context.username, "bahadir2")
+        self.assertEqual(context.data_access_group_id, "42")
         self.assertEqual(context.data_access_group, "Marmara")
         self.assertEqual(context.data_access_group_unique_name, "marmara")
+        self.assertTrue(context.can_switch_data_access_group)
+        self.assertEqual(len(context.available_data_access_groups), 2)
+        self.assertTrue(context.available_data_access_groups[0].active)
+        self.assertEqual(context.available_data_access_groups[1].data_access_group_unique_name, "pendik")
         self.assertTrue(context.api_import)
         self.assertTrue(context.api_export)
         self.assertTrue(has_redcap_user_context_value(context))
@@ -230,6 +258,44 @@ class RedcapClientTests(unittest.TestCase):
         self.assertEqual(payload["returnFormat"], "json")
         self.assertEqual(context.username, "api-user")
         self.assertEqual(context.data_access_group, "DAG A")
+
+    def test_external_module_user_dag_switch_posts_unique_name(self) -> None:
+        client = RedcapClient("https://redcap.example/api/", "token")
+        with patch.object(
+            client,
+            "_post_form",
+            return_value=json.dumps(
+                {"ok": True, "switched": True, "username": "api-user", "data_access_group": "B"}
+            ),
+        ) as post_form:
+            context = client.set_external_module_user_dag(
+                prefix="tc_hash",
+                action="set-api-user-dag",
+                data_access_group_unique_name="dag_b",
+            )
+
+        payload = post_form.call_args.args[0]
+        self.assertEqual(payload["content"], "externalModule")
+        self.assertEqual(payload["action"], "set-api-user-dag")
+        self.assertEqual(payload["data_access_group_unique_name"], "dag_b")
+        self.assertNotIn("dag_group_id", payload)
+        self.assertEqual(context.data_access_group, "B")
+
+    def test_external_module_user_dag_switch_posts_no_assignment(self) -> None:
+        client = RedcapClient("https://redcap.example/api/", "token")
+        with patch.object(
+            client,
+            "_post_form",
+            return_value=json.dumps({"ok": True, "switched": True, "username": "api-user"}),
+        ) as post_form:
+            client.set_external_module_user_dag(
+                prefix="tc_hash",
+                action="set-api-user-dag",
+                dag_group_id="0",
+            )
+
+        payload = post_form.call_args.args[0]
+        self.assertEqual(payload["dag_group_id"], "0")
 
 
 if __name__ == "__main__":

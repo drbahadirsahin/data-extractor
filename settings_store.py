@@ -46,8 +46,11 @@ class RedcapProjectToken:
     project_name: str
     token_secret_name: str
     username: str | None = None
+    data_access_group_id: str | None = None
     data_access_group: str | None = None
     data_access_group_unique_name: str | None = None
+    can_switch_data_access_group: bool | None = None
+    available_data_access_groups: list[dict[str, Any]] = field(default_factory=list)
 
     @classmethod
     def from_dict(cls, payload: dict[str, Any] | None) -> "RedcapProjectToken | None":
@@ -64,8 +67,11 @@ class RedcapProjectToken:
             project_name=project_name,
             token_secret_name=token_secret_name,
             username=coerce_optional_str(payload.get("username")),
+            data_access_group_id=coerce_optional_str(payload.get("data_access_group_id")),
             data_access_group=coerce_optional_str(payload.get("data_access_group")),
             data_access_group_unique_name=coerce_optional_str(payload.get("data_access_group_unique_name")),
+            can_switch_data_access_group=coerce_optional_bool(payload.get("can_switch_data_access_group")),
+            available_data_access_groups=coerce_dag_options(payload.get("available_data_access_groups")),
         )
 
 
@@ -272,3 +278,38 @@ def coerce_optional_str(value: Any) -> str | None:
     if value in {None, ""}:
         return None
     return str(value)
+
+
+def coerce_optional_bool(value: Any) -> bool | None:
+    if value in {None, ""}:
+        return None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    text = str(value).strip().lower()
+    if text in {"1", "true", "yes", "y"}:
+        return True
+    if text in {"0", "false", "no", "n"}:
+        return False
+    return None
+
+
+def coerce_dag_options(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    options: list[dict[str, Any]] = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        options.append(
+            {
+                "data_access_group_id": coerce_optional_str(item.get("data_access_group_id")),
+                "data_access_group": coerce_optional_str(item.get("data_access_group")),
+                "data_access_group_unique_name": coerce_optional_str(item.get("data_access_group_unique_name")),
+                "active": coerce_optional_bool(item.get("active")) is True,
+                "switchable": coerce_optional_bool(item.get("switchable")) is True,
+                "no_assignment": coerce_optional_bool(item.get("no_assignment")) is True,
+            }
+        )
+    return options

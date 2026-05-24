@@ -8,7 +8,12 @@ from llm_settings import managed_llm_settings_from_config
 from runtime_context import RuntimeContext
 from gui.i18n import tr
 from release_profile import app_version, show_advanced_ui
-from redcap_client import RedcapAPIError, has_redcap_user_context_value, load_redcap_user_context_module_config
+from redcap_client import (
+    RedcapAPIError,
+    RedcapClient,
+    has_redcap_user_context_value,
+    load_redcap_user_context_module_config,
+)
 from settings_store import RedcapProjectToken
 from workspace_flow import ensure_project_config
 
@@ -121,6 +126,7 @@ class ClinicalMainWindow:
             open_import=lambda: self.set_page("import"),
             open_excel=self.open_excel_import_flow,
             open_document_flow=self.open_document_import_flow,
+            change_dag=self.change_active_dag,
         )
         self.redcap_page = ClinicalRedcapPage(runtime=runtime, on_saved=self.after_redcap_saved)
         self.import_page = ClinicalImportPage(
@@ -137,6 +143,7 @@ class ClinicalMainWindow:
             get_patient_count=lambda: len(self.workspace_page.patient_queue_items),
             get_patient_summaries=self.workspace_page.patient_queue_summaries,
             get_scope_summary=self.build_clinical_scope_summary,
+            change_dag=self.change_active_dag,
         )
 
         self.pages = [
@@ -235,6 +242,7 @@ class ClinicalMainWindow:
             settings.redcap.selected_project_name = project.project_name
             settings.redcap.selected_project_token_secret_name = project.token_secret_name
             self.runtime.settings_store.save(settings)
+            self.refresh_project_user_context(project)
             self.workspace_page.refresh_redcap_projects()
             self.populate_connection_project_combo()
             self.home_page.refresh()
@@ -245,6 +253,78 @@ class ClinicalMainWindow:
         self.workspace_page.refresh_redcap_projects()
         self.refresh_connection_state()
         self.set_page("import")
+
+    def refresh_project_user_context(self, project: RedcapProjectToken | None = None) -> bool:
+        project = project or current_redcap_project_token(self.runtime.settings)
+        if project is None:
+            return False
+        token = self.runtime.secrets_store.get(project.token_secret_name)
+        if not token:
+            return False
+        module_config = load_redcap_user_context_module_config(self.runtime.app_config)
+        if not module_config.can_request:
+            return False
+        try:
+            client = RedcapClient(api_url=project.api_url, api_token=token)
+            context = client.get_external_module_user_context(
+                prefix=module_config.prefix,
+                action=module_config.action,
+            )
+        except Exception as exc:
+            logging.info("Project user context refresh failed: %s", exc)
+            return False
+        if not has_redcap_user_context_value(context):
+            return False
+        self.update_saved_project_user_context(project.project_id, context)
+        return True
+
+    def update_saved_project_user_context(self, project_id: str, context: Any) -> None:
+        updated = False
+        for item in self.runtime.settings.redcap.saved_project_tokens:
+            if item.project_id != str(project_id):
+                continue
+            apply_user_context_to_project_token(item, context)
+            updated = True
+            break
+        if updated:
+            self.runtime.settings_store.save(self.runtime.settings)
+
+    def change_active_dag(self, option: dict[str, Any]) -> None:
+        from PySide6.QtWidgets import QMessageBox
+
+        project = current_redcap_project_token(self.runtime.settings)
+        if project is None:
+            return
+        token = self.runtime.secrets_store.get(project.token_secret_name)
+        if not token:
+            QMessageBox.warning(
+                self._window,
+                tr("clinical_dag_switch_title", self.language),
+                tr("clinical_dag_switch_missing_token", self.language),
+            )
+            return
+        module_config = load_redcap_user_context_module_config(self.runtime.app_config)
+        if not module_config.can_set_dag:
+            return
+        try:
+            client = RedcapClient(api_url=project.api_url, api_token=token)
+            context = client.set_external_module_user_dag(
+                prefix=module_config.prefix,
+                action=module_config.set_dag_action,
+                data_access_group_unique_name=option.get("data_access_group_unique_name"),
+                dag_group_id="0" if option.get("no_assignment") else option.get("data_access_group_id"),
+                data_access_group=option.get("data_access_group"),
+            )
+        except Exception as exc:
+            QMessageBox.warning(
+                self._window,
+                tr("clinical_dag_switch_title", self.language),
+                tr("clinical_dag_switch_failed", self.language, error=str(exc)),
+            )
+            self.refresh_connection_state()
+            return
+        self.update_saved_project_user_context(project.project_id, context)
+        self.refresh_connection_state()
 
     def open_document_import_flow(self) -> None:
         self.set_page("import")
@@ -525,11 +605,22 @@ class ClinicalHomePage:
         open_import: Callable[[], None],
         open_excel: Callable[[], None],
         open_document_flow: Callable[[], None],
+        change_dag: Callable[[dict[str, Any]], None] | None = None,
     ) -> None:
-        from PySide6.QtWidgets import QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
+        from PySide6.QtWidgets import (
+            QComboBox,
+            QFrame,
+            QGridLayout,
+            QHBoxLayout,
+            QLabel,
+            QPushButton,
+            QVBoxLayout,
+            QWidget,
+        )
 
         self.runtime = runtime
         self.language = runtime.settings.ui.language
+        self.change_dag = change_dag
         self.widget = QWidget()
         layout = QVBoxLayout(self.widget)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -551,9 +642,23 @@ class ClinicalHomePage:
         text_group.addWidget(subtitle)
         band_layout.addLayout(text_group, 1)
 
+        project_context = QWidget()
+        project_context_layout = QVBoxLayout(project_context)
+        project_context_layout.setContentsMargins(0, 0, 0, 0)
+        project_context_layout.setSpacing(6)
         self.status_label = QLabel("")
         self.status_label.setObjectName("WarningPill")
-        band_layout.addWidget(self.status_label)
+        self.user_context_label = QLabel("")
+        self.user_context_label.setObjectName("ProjectContextLabel")
+        self.user_context_label.setWordWrap(True)
+        self.dag_combo = QComboBox()
+        self.dag_combo.setObjectName("DagSwitchCombo")
+        self.dag_combo.setMinimumWidth(180)
+        self.dag_combo.currentIndexChanged.connect(self.on_dag_changed)
+        project_context_layout.addWidget(self.status_label)
+        project_context_layout.addWidget(self.user_context_label)
+        project_context_layout.addWidget(self.dag_combo)
+        band_layout.addWidget(project_context)
         layout.addWidget(band)
 
         grid = QGridLayout()
@@ -594,16 +699,34 @@ class ClinicalHomePage:
         layout.addStretch(1)
         self.refresh()
 
+    def on_dag_changed(self) -> None:
+        option = self.dag_combo.currentData()
+        if self.change_dag is None or not isinstance(option, dict) or option.get("active") or not option.get("switchable"):
+            return
+        self.change_dag(option)
+
     def refresh(self) -> None:
         project = self.runtime.settings.redcap.selected_project_name
+        project_token = current_redcap_project_token(self.runtime.settings)
         if project:
             self.status_label.setObjectName("StatusPill")
             self.status_label.setText(tr("clinical_ready_status", self.language, project=project))
+            self.user_context_label.setVisible(True)
+            self.user_context_label.setText(
+                format_project_user_context(project_token, self.language)
+                if project_token is not None
+                else tr("clinical_user_context_missing", self.language)
+            )
         else:
             self.status_label.setObjectName("WarningPill")
             self.status_label.setText(tr("clinical_setup_required_status", self.language))
+            self.user_context_label.setVisible(False)
+            self.user_context_label.setText("")
+        configure_dag_switch_combo(self.dag_combo, project_token, self.language)
         self.status_label.style().unpolish(self.status_label)
         self.status_label.style().polish(self.status_label)
+        self.user_context_label.style().unpolish(self.user_context_label)
+        self.user_context_label.style().polish(self.user_context_label)
 
 
 class ClinicalRedcapPage:
@@ -777,17 +900,16 @@ class ClinicalRedcapPage:
         replacing_existing = any(
             item.project_id == project.project_id for item in settings.redcap.saved_project_tokens
         )
+        project_token = RedcapProjectToken(
+            api_url=api_url,
+            project_id=project.project_id,
+            project_name=project.project_title,
+            token_secret_name=token_secret_name,
+        )
+        apply_user_context_to_project_token(project_token, self.validated_user_context)
         upsert_project_token(
             settings.redcap.saved_project_tokens,
-            RedcapProjectToken(
-                api_url=api_url,
-                project_id=project.project_id,
-                project_name=project.project_title,
-                token_secret_name=token_secret_name,
-                username=getattr(self.validated_user_context, "username", None),
-                data_access_group=getattr(self.validated_user_context, "data_access_group", None),
-                data_access_group_unique_name=getattr(self.validated_user_context, "data_access_group_unique_name", None),
-            ),
+            project_token,
         )
         settings.first_run_completed = True
         self.runtime.settings_store.save(settings)
@@ -954,9 +1076,11 @@ class ClinicalImportPage:
         get_patient_count: Callable[[], int],
         get_patient_summaries: Callable[[], list[str]],
         get_scope_summary: Callable[[], str],
+        change_dag: Callable[[dict[str, Any]], None] | None = None,
         show_advanced: bool = False,
     ) -> None:
         from PySide6.QtWidgets import (
+            QComboBox,
             QFrame,
             QHBoxLayout,
             QLabel,
@@ -980,6 +1104,7 @@ class ClinicalImportPage:
         self.get_patient_count = get_patient_count
         self.get_patient_summaries = get_patient_summaries
         self.get_scope_summary = get_scope_summary
+        self.change_dag = change_dag
         self.document_step = 0
         self.excel_step = 0
         self.document_step_labels = []
@@ -1010,12 +1135,17 @@ class ClinicalImportPage:
         self.project_user_context = QLabel("")
         self.project_user_context.setObjectName("ProjectContextLabel")
         self.project_user_context.setWordWrap(True)
+        self.dag_combo = QComboBox()
+        self.dag_combo.setObjectName("DagSwitchCombo")
+        self.dag_combo.setMinimumWidth(180)
+        self.dag_combo.currentIndexChanged.connect(self.on_dag_changed)
         project_status_group = QWidget()
         project_status_layout = QVBoxLayout(project_status_group)
         project_status_layout.setContentsMargins(0, 0, 0, 0)
         project_status_layout.setSpacing(5)
         project_status_layout.addWidget(self.project_status)
         project_status_layout.addWidget(self.project_user_context)
+        project_status_layout.addWidget(self.dag_combo)
         header_layout.addWidget(project_status_group)
         layout.addWidget(header)
 
@@ -1042,12 +1172,18 @@ class ClinicalImportPage:
         self.refresh()
         self.set_flow("documents")
 
+    def on_dag_changed(self) -> None:
+        option = self.dag_combo.currentData()
+        if self.change_dag is None or not isinstance(option, dict) or option.get("active") or not option.get("switchable"):
+            return
+        self.change_dag(option)
+
     def refresh(self) -> None:
         project = self.runtime.settings.redcap.selected_project_name
+        project_token = current_redcap_project_token(self.runtime.settings)
         if project:
             self.project_status.setObjectName("StatusPill")
             self.project_status.setText(tr("clinical_import_project_ready", self.language, project=project))
-            project_token = current_redcap_project_token(self.runtime.settings)
             self.project_user_context.setText(
                 format_project_user_context(project_token, self.language)
                 if project_token is not None
@@ -1057,6 +1193,7 @@ class ClinicalImportPage:
             self.project_status.setObjectName("WarningPill")
             self.project_status.setText(tr("clinical_import_project_missing", self.language))
             self.project_user_context.setText(tr("clinical_user_context_missing", self.language))
+        configure_dag_switch_combo(self.dag_combo, project_token, self.language)
         self.project_status.style().unpolish(self.project_status)
         self.project_status.style().polish(self.project_status)
         self.project_user_context.style().unpolish(self.project_user_context)
@@ -1483,6 +1620,96 @@ def format_project_user_context(project: RedcapProjectToken, language: str) -> s
     username = project.username or tr("clinical_user_unknown", language)
     dag = project.data_access_group or project.data_access_group_unique_name or tr("clinical_dag_none", language)
     return tr("clinical_user_context", language, username=username, dag=dag)
+
+
+def apply_user_context_to_project_token(project: RedcapProjectToken, context: Any) -> None:
+    if context is None:
+        return
+    project.username = getattr(context, "username", None)
+    project.data_access_group_id = getattr(context, "data_access_group_id", None)
+    project.data_access_group = getattr(context, "data_access_group", None)
+    project.data_access_group_unique_name = getattr(context, "data_access_group_unique_name", None)
+    project.can_switch_data_access_group = getattr(context, "can_switch_data_access_group", None)
+    project.available_data_access_groups = [
+        redcap_dag_option_to_dict(option)
+        for option in (getattr(context, "available_data_access_groups", None) or [])
+    ]
+
+
+def redcap_dag_option_to_dict(option: Any) -> dict[str, Any]:
+    return {
+        "data_access_group_id": getattr(option, "data_access_group_id", None),
+        "data_access_group": getattr(option, "data_access_group", None),
+        "data_access_group_unique_name": getattr(option, "data_access_group_unique_name", None),
+        "active": bool(getattr(option, "active", False)),
+        "switchable": bool(getattr(option, "switchable", False)),
+        "no_assignment": bool(getattr(option, "no_assignment", False)),
+    }
+
+
+def configure_dag_switch_combo(combo: Any, project: RedcapProjectToken | None, language: str) -> None:
+    combo.blockSignals(True)
+    combo.clear()
+    options = list(getattr(project, "available_data_access_groups", []) or []) if project is not None else []
+    can_switch = bool(getattr(project, "can_switch_data_access_group", False)) and len(options) > 1
+    if not can_switch:
+        combo.setVisible(False)
+        combo.blockSignals(False)
+        return
+
+    active_index = 0
+    for option in options:
+        if not isinstance(option, dict):
+            continue
+        normalized = normalize_dag_option(option, project)
+        combo.addItem(dag_option_label(normalized, language), normalized)
+        if normalized.get("active"):
+            active_index = combo.count() - 1
+    combo.setCurrentIndex(active_index)
+    combo.setEnabled(any(not item.get("active") and item.get("switchable") for item in combo_item_data(combo)))
+    combo.setVisible(combo.count() > 1)
+    combo.blockSignals(False)
+
+
+def combo_item_data(combo: Any) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    for index in range(combo.count()):
+        item = combo.itemData(index)
+        if isinstance(item, dict):
+            items.append(item)
+    return items
+
+
+def normalize_dag_option(option: dict[str, Any], project: RedcapProjectToken | None) -> dict[str, Any]:
+    normalized = {
+        "data_access_group_id": option.get("data_access_group_id"),
+        "data_access_group": option.get("data_access_group"),
+        "data_access_group_unique_name": option.get("data_access_group_unique_name"),
+        "active": bool(option.get("active")),
+        "switchable": bool(option.get("switchable")),
+        "no_assignment": bool(option.get("no_assignment")),
+    }
+    if project is not None and not normalized["active"]:
+        normalized["active"] = any(
+            [
+                normalized["data_access_group_unique_name"]
+                and normalized["data_access_group_unique_name"] == project.data_access_group_unique_name,
+                normalized["data_access_group_id"] and normalized["data_access_group_id"] == project.data_access_group_id,
+                normalized["no_assignment"] and not project.data_access_group_unique_name and not project.data_access_group_id,
+            ]
+        )
+    return normalized
+
+
+def dag_option_label(option: dict[str, Any], language: str) -> str:
+    if option.get("no_assignment"):
+        return tr("clinical_dag_no_assignment", language)
+    return (
+        str(option.get("data_access_group") or "").strip()
+        or str(option.get("data_access_group_unique_name") or "").strip()
+        or str(option.get("data_access_group_id") or "").strip()
+        or tr("clinical_dag_none", language)
+    )
 
 
 def current_redcap_project_token(settings: Any) -> RedcapProjectToken | None:

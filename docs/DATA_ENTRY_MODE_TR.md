@@ -125,15 +125,30 @@ Aktif token/DAG için kullanıcının erişebildiği kayıtların minimal listes
   "project_id": "17",
   "dag": "marmara",
   "records": [
-    {"record": "1", "remote_updated_at": "2026-05-24T10:12:00Z"}
+    {
+      "record": "1",
+      "data_access_group_unique_name": "marmara",
+      "record_last_modified_at": "2026-05-24 10:12:00",
+      "identity_hash_updated_at": "2026-05-24 10:31:00",
+      "sync_updated_at": "2026-05-24 10:31:00"
+    }
   ],
-  "identity_hash_updated_at": "2026-05-24T10:12:00Z"
+  "identity_hash_updated_at": "2026-05-24 10:31:00"
 }
 ```
+
+`sync_updated_at`, `record_last_modified_at` ve `identity_hash_updated_at` değerlerinin maksimumu olarak kabul edilir. Lokal conflict kontrolünde kayıt bazlı karşılaştırma zamanı olarak `sync_updated_at` kullanılmalıdır.
 
 ### `get-record-data`
 
 Belirli kayıtların `redcap_data` şekline yakın satırlarını döndürür.
+
+Desteklenen parametreler:
+
+- `records`: JSON array string; örnek `["1","2"]`.
+- `fields`: JSON array string; örnek `["hasta_ad","hasta_soyad"]`.
+- `events`: JSON array string.
+- `since`: server tarafında kayıt/değer filtreleme için opsiyonel timestamp.
 
 ```json
 {
@@ -141,7 +156,7 @@ Belirli kayıtların `redcap_data` şekline yakın satırlarını döndürür.
   "records": [
     {
       "record": "1",
-      "remote_updated_at": "2026-05-24T10:12:00Z",
+      "record_last_modified_at": "2026-05-24 10:12:00",
       "rows": [
         {
           "project_id": "17",
@@ -166,10 +181,9 @@ Aktif token/DAG için `tc_hash -> record` eşlemesini döndürür.
   "project_id": "17",
   "rows": [
     {
-      "tc_hash": "...",
       "record": "1",
-      "dag_unique_name": "marmara",
-      "remote_updated_at": "2026-05-24T10:12:00Z"
+      "identity_hash": "...",
+      "identity_hash_updated_at": "2026-05-24 10:31:00"
     }
   ]
 }

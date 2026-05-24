@@ -40,6 +40,8 @@ class RemoteRecordManifest:
     record: str
     remote_updated_at: str
     dag_unique_name: str | None = None
+    record_last_modified_at: str | None = None
+    identity_hash_updated_at: str | None = None
 
 
 @dataclass(frozen=True)

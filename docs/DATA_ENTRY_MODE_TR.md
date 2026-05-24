@@ -243,11 +243,19 @@ değişiklik olan kayıtları ezmeden conflict listesine alır.
 iskeleti sağlar. Değer toplama `collect_values()` ile REDCap flat payload'a yakın
 şekilde yapılır; checkbox alanları `field___code` anahtarları olarak döner.
 
+`data_entry_form_changes.py` formdan gelen değerleri mevcut form modeliyle
+karşılaştırır. Sadece değişen editlenebilir alanlar `pending_changes` kuyruğuna
+yazılır; read-only ve descriptive alanlar atlanır. Checkbox alanları REDCap flat
+formatına uygun olarak `field___code` değişikliklerine ayrılır.
+
 Lokal görsel deneme:
 
 ```bash
 .venv/bin/python scripts/demo_data_entry_form.py
 ```
+
+Demo penceresinde bir alanı değiştirip `Queue local changes` düğmesine basarak
+lokal pending queue davranışı görülebilir.
 
 ## Geliştirme Sırası
 

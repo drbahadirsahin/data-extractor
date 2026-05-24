@@ -82,6 +82,14 @@ class GuiDataEntryFormTests(unittest.TestCase):
         self.assertEqual(values["risk___2"], "0")
         self.assertNotIn("info", values)
 
+        form.editor_widgets["hasta_ad"].setText("EF")
+        form.editor_widgets["risk"][1].setChecked(True)
+        change_set = form.collect_change_set()
+        self.assertEqual([(item.field_name, item.new_value) for item in change_set.changes], [
+            ("hasta_ad", "EF"),
+            ("risk___2", "1"),
+        ])
+
     def test_set_model_replaces_existing_editors(self) -> None:
         get_qapplication()
         form = DataEntryFormWidget(

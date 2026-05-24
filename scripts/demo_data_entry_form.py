@@ -9,6 +9,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from data_entry_browser import DataEntryRecordBrowser
+from data_entry_form_changes import apply_form_changes
 from data_entry_form_model import build_form_render_model
 from data_entry_store import DataEntryStore, RedcapDataValue
 from dictionary_parser import FieldSpec
@@ -18,7 +19,7 @@ from gui.data_entry_form import DataEntryFormWidget
 
 def main() -> int:
     try:
-        from PySide6.QtWidgets import QApplication, QMainWindow, QScrollArea
+        from PySide6.QtWidgets import QApplication, QLabel, QMainWindow, QPushButton, QScrollArea, QVBoxLayout, QWidget
     except ImportError:
         print("PySide6 is required for the data-entry form demo.")
         return 1
@@ -80,7 +81,8 @@ def main() -> int:
             ),
         ]
     }
-    detail = DataEntryRecordBrowser(store).get_record_detail("17", "1")
+    browser = DataEntryRecordBrowser(store)
+    detail = browser.get_record_detail("17", "1")
     model = build_form_render_model(
         detail,
         fields,
@@ -94,10 +96,42 @@ def main() -> int:
     scroll = QScrollArea()
     scroll.setWidgetResizable(True)
     scroll.setWidget(rendered.widget)
+    status = QLabel("Change a field, then queue changes.")
+    status.setObjectName("MutedLabel")
+    status.setWordWrap(True)
+    queue_button = QPushButton("Queue local changes")
+
+    def queue_changes() -> None:
+        nonlocal model
+        result = apply_form_changes(store, model, rendered.collect_values())
+        if result.queued_count == 0:
+            status.setText("No changed fields to queue.")
+            return
+        detail_after_save = browser.get_record_detail("17", "1")
+        model = build_form_render_model(
+            detail_after_save,
+            fields,
+            form_labels={"hasta_bilgileri": "Hasta Bilgileri"},
+            title="Demo kayit 1",
+        )
+        rendered.set_model(model)
+        status.setText(
+            f"Queued {result.queued_count} local change(s). "
+            f"Pending changes: {len(store.pending_changes('17'))}."
+        )
+
+    queue_button.clicked.connect(queue_changes)
+    central = QWidget()
+    central_layout = QVBoxLayout(central)
+    central_layout.setContentsMargins(16, 16, 16, 16)
+    central_layout.setSpacing(10)
+    central_layout.addWidget(scroll, 1)
+    central_layout.addWidget(queue_button)
+    central_layout.addWidget(status)
     window = QMainWindow()
     window.setWindowTitle("Data Entry Form Demo")
     window.resize(920, 760)
-    window.setCentralWidget(scroll)
+    window.setCentralWidget(central)
     window.show()
     try:
         return app.exec()

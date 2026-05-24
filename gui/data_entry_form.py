@@ -215,6 +215,13 @@ class DataEntryFormWidget:
                     values[f"{field.field_name}___{choice_code}"] = "1" if checkbox.isChecked() else "0"
         return values
 
+    def collect_change_set(self):
+        from data_entry_form_changes import build_form_change_set
+
+        if self.model is None:
+            return None
+        return build_form_change_set(self.model, self.collect_values())
+
 
 def clear_layout(layout: Any) -> None:
     while layout.count():

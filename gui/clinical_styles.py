@@ -318,6 +318,24 @@ QListWidget#WizardQueueList {
     padding: 8px;
 }
 
+QListWidget#DataEntryRecordList {
+    background: #ffffff;
+    border: 1px solid #ded8cd;
+    border-radius: 8px;
+    padding: 8px;
+    min-width: 260px;
+}
+
+QListWidget#DataEntryRecordList::item {
+    padding: 8px 10px;
+    border-radius: 6px;
+}
+
+QListWidget#DataEntryRecordList::item:selected {
+    background: #edf8f4;
+    color: #0f766e;
+}
+
 QWidget#DataEntryForm {
     background: transparent;
 }

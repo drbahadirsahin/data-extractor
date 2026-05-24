@@ -75,6 +75,7 @@ class ClinicalMainWindow:
         )
 
         from gui.workspace_page import WorkspacePage
+        from gui.data_entry_page import ClinicalDataEntryPage
 
         self.runtime = runtime
         self.language = runtime.settings.ui.language
@@ -124,11 +125,13 @@ class ClinicalMainWindow:
             runtime=runtime,
             open_redcap=lambda: self.set_page("redcap"),
             open_import=lambda: self.set_page("import"),
+            open_data_entry=lambda: self.set_page("data_entry"),
             open_excel=self.open_excel_import_flow,
             open_document_flow=self.open_document_import_flow,
             change_dag=self.change_active_dag,
         )
         self.redcap_page = ClinicalRedcapPage(runtime=runtime, on_saved=self.after_redcap_saved)
+        self.data_entry_page = ClinicalDataEntryPage(runtime)
         self.import_page = ClinicalImportPage(
             runtime=runtime,
             add_patient_documents=self.workspace_page.add_patient_documents_to_queue,
@@ -150,6 +153,7 @@ class ClinicalMainWindow:
             ClinicalPage("home", "clinical_nav_home", self.home_page.widget),
             ClinicalPage("redcap", "clinical_nav_redcap", self.redcap_page.widget),
             ClinicalPage("import", "clinical_nav_import", self.import_page.widget),
+            ClinicalPage("data_entry", "clinical_nav_data_entry", self.data_entry_page.widget),
         ]
         if self.show_advanced_ui:
             self.pages.append(ClinicalPage("advanced", "clinical_nav_advanced", self.workspace_page.widget))
@@ -197,6 +201,7 @@ class ClinicalMainWindow:
         self.populate_connection_project_combo()
         self.home_page.refresh()
         self.import_page.refresh()
+        self.data_entry_page.refresh_project_state()
 
     def populate_connection_project_combo(self) -> None:
         current_project_id = self.runtime.settings.redcap.selected_project_id
@@ -247,6 +252,7 @@ class ClinicalMainWindow:
             self.populate_connection_project_combo()
             self.home_page.refresh()
             self.import_page.refresh()
+            self.data_entry_page.refresh_project_state()
             return
 
     def after_redcap_saved(self) -> None:
@@ -586,6 +592,8 @@ class ClinicalMainWindow:
             key = "home"
         if key == "advanced":
             self.workspace_page.refresh_redcap_projects()
+        if key == "data_entry":
+            self.data_entry_page.refresh_project_state()
         self.stack.setCurrentIndex(page_keys.index(key))
         for item_key, button in self.nav_buttons.items():
             button.setProperty("active", item_key == key)
@@ -603,6 +611,7 @@ class ClinicalHomePage:
         runtime: RuntimeContext,
         open_redcap: Callable[[], None],
         open_import: Callable[[], None],
+        open_data_entry: Callable[[], None],
         open_excel: Callable[[], None],
         open_document_flow: Callable[[], None],
         change_dag: Callable[[dict[str, Any]], None] | None = None,
@@ -691,6 +700,18 @@ class ClinicalHomePage:
                 primary_action=open_excel,
             ),
             1,
+            0,
+            1,
+            2,
+        )
+        grid.addWidget(
+            build_workflow_card(
+                title=tr("clinical_card_data_entry_title", self.language),
+                body=tr("clinical_card_data_entry_body", self.language),
+                primary_label=tr("clinical_card_data_entry_action", self.language),
+                primary_action=open_data_entry,
+            ),
+            2,
             0,
             1,
             2,

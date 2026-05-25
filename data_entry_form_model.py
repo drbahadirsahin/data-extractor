@@ -39,6 +39,7 @@ class FormFieldModel:
     required: bool = False
     branching_logic: str | None = None
     read_only: bool = False
+    hidden: bool = False
     present: bool = True
     dirty: bool = False
     event_id: str = ""
@@ -92,6 +93,9 @@ def build_form_render_model(
             )
             for spec in field_specs
         ]
+        fields = [field for field in fields if not field.hidden]
+        if not fields:
+            continue
         sections.append(
             FormSectionModel(
                 form_name=form_name,
@@ -121,7 +125,9 @@ def build_field_model(
     choices = choices_for_field(field_spec, field_type=field_type)
     direct_value = direct_values.get(field_name)
     editor = editor_for_field(field_spec, field_type=field_type)
-    read_only = editor in {READONLY_EDITOR, DESCRIPTION_EDITOR}
+    annotations = metadata_annotations(field_spec)
+    read_only = editor in {READONLY_EDITOR, DESCRIPTION_EDITOR} or annotation_has(annotations, "@READONLY")
+    hidden = annotation_has(annotations, "@HIDDEN")
     if editor == CHECKBOX_EDITOR:
         value: str | list[str] = sorted(checkbox_values.get(field_name, set()))
         present = bool(value) or direct_value is not None
@@ -149,6 +155,7 @@ def build_field_model(
         required=metadata_bool(field_spec, "required"),
         branching_logic=metadata_optional_text(field_spec, "branching_logic"),
         read_only=read_only,
+        hidden=hidden,
         present=present,
         dirty=dirty,
         event_id=direct_value.event_id if direct_value is not None else "",
@@ -271,3 +278,19 @@ def metadata_bool(field_spec: Any, attribute: str) -> bool:
     if isinstance(value, bool):
         return value
     return str(value or "").strip().lower() in {"1", "true", "yes", "y", "required"}
+
+
+def metadata_annotations(field_spec: Any) -> list[str]:
+    value = getattr(field_spec, "field_annotation", None)
+    if value is None and isinstance(field_spec, dict):
+        value = field_spec.get("field_annotation")
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    return [part.strip() for part in str(value).replace("\n", " ").split() if part.strip()]
+
+
+def annotation_has(annotations: list[str], target: str) -> bool:
+    target = target.upper()
+    return any(str(item).upper() == target for item in annotations)

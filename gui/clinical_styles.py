@@ -340,6 +340,31 @@ QWidget#DataEntryForm {
     background: transparent;
 }
 
+QTabWidget#DataEntryFormTabs::pane {
+    border: 1px solid #e0ded7;
+    border-radius: 8px;
+    background: #ffffff;
+    top: -1px;
+}
+
+QTabWidget#DataEntryFormTabs QTabBar::tab {
+    background: #f2f4f5;
+    color: #526170;
+    border: 1px solid #d8d5cc;
+    border-bottom: none;
+    border-top-left-radius: 7px;
+    border-top-right-radius: 7px;
+    padding: 9px 14px;
+    margin-right: 4px;
+    font-weight: 650;
+}
+
+QTabWidget#DataEntryFormTabs QTabBar::tab:selected {
+    background: #ffffff;
+    color: #0f766e;
+    border-color: #b7ded5;
+}
+
 QLabel#DataEntryRecordTitle {
     color: #17202a;
     font-size: 22px;

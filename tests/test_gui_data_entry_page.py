@@ -5,6 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -25,6 +26,15 @@ class FakeSecretsStore:
 
     def get(self, key):
         return self.values.get(key)
+
+
+class FakeIdentityRegistryClient:
+    def __init__(self, config, api_token):
+        self.config = config
+        self.api_token = api_token
+
+    def create_record_by_tc(self, tc_identity_no: str):
+        return SimpleNamespace(record_id="9001", created=True, raw={})
 
 
 class GuiDataEntryPageTests(unittest.TestCase):
@@ -108,7 +118,7 @@ class GuiDataEntryPageTests(unittest.TestCase):
             self.assertFalse(page.dag_combo.isHidden())
             self.assertEqual(page.dag_combo.count(), 2)
 
-    def test_new_record_opens_blank_metadata_form_and_queues_changes(self) -> None:
+    def test_new_record_creates_record_by_tc_then_queues_changes(self) -> None:
         get_qapplication()
         with tempfile.TemporaryDirectory() as temp_dir:
             app_home = Path(temp_dir)
@@ -118,17 +128,53 @@ class GuiDataEntryPageTests(unittest.TestCase):
             runtime = build_runtime(app_home, config_path)
             page = ClinicalDataEntryPage(runtime)
 
-            page.open_new_record("99")
+            with patch("gui.data_entry_page.IdentityRegistryClient", FakeIdentityRegistryClient):
+                page.open_new_record("19226637242")
+
             self.assertIsNotNone(page.current_model)
-            self.assertEqual(page.current_model.record, "99")
+            self.assertEqual(page.current_model.record, "9001")
             page.form_widget.editor_widgets["hasta_ad"].setText("Yeni")
             page.save_current_record()
 
             pending = store.pending_changes("17")
             self.assertEqual(len(pending), 1)
-            self.assertEqual(pending[0]["record"], "99")
+            self.assertEqual(pending[0]["record"], "9001")
             self.assertEqual(pending[0]["field_name"], "hasta_ad")
             self.assertEqual(pending[0]["new_value"], "Yeni")
+
+    def test_new_record_switches_selected_dag_before_server_create(self) -> None:
+        get_qapplication()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app_home = Path(temp_dir)
+            config_path = write_project_config(app_home)
+            runtime = build_runtime(app_home, config_path)
+            project = runtime.settings.redcap.saved_project_tokens[0]
+            project.data_access_group_id = "42"
+            project.data_access_group = "Marmara"
+            project.data_access_group_unique_name = "marmara"
+            project.can_switch_data_access_group = True
+            target_dag = {
+                "data_access_group_id": "43",
+                "data_access_group": "Pendik",
+                "data_access_group_unique_name": "pendik",
+                "active": False,
+                "switchable": True,
+                "no_assignment": False,
+            }
+
+            def change_dag(option):
+                project.data_access_group_id = option["data_access_group_id"]
+                project.data_access_group = option["data_access_group"]
+                project.data_access_group_unique_name = option["data_access_group_unique_name"]
+
+            page = ClinicalDataEntryPage(runtime, change_dag=change_dag)
+
+            with patch("gui.data_entry_page.IdentityRegistryClient", FakeIdentityRegistryClient):
+                page.open_new_record("19226637242", dag_option=target_dag)
+
+            self.assertEqual(project.data_access_group_unique_name, "pendik")
+            self.assertIsNotNone(page.current_model)
+            self.assertEqual(page.current_model.record, "9001")
 
     def test_page_requires_active_redcap_project(self) -> None:
         get_qapplication()

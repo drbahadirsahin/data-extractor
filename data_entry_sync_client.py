@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass
 from typing import Any, Iterable
 from urllib import error, parse, request
@@ -124,16 +125,38 @@ class DataEntrySyncClient:
             "returnFormat": "json",
         }
         payload.update(extra_payload)
+        action = str(payload.get("action") or "")
+        logging.info(
+            "Data-entry sync external module request: api_urls=%s prefix=%s action=%s params=%s",
+            ", ".join(self.api_urls),
+            payload.get("prefix"),
+            action,
+            ", ".join(sorted(key for key in payload.keys() if key != "token")),
+        )
 
         last_http_error: error.HTTPError | None = None
         last_response_body = ""
         for api_url in self.api_urls:
             try:
-                return self._post_form_once(api_url, payload)
+                response = self._post_form_once(api_url, payload)
+                logging.info(
+                    "Data-entry sync external module response received: api_url=%s action=%s type=%s",
+                    api_url,
+                    action,
+                    type(response).__name__,
+                )
+                return response
             except error.HTTPError as exc:
                 response_body = exc.read().decode("utf-8", errors="replace")
                 last_http_error = exc
                 last_response_body = response_body
+                logging.info(
+                    "Data-entry sync external module HTTP error: api_url=%s action=%s code=%s body=%s",
+                    api_url,
+                    action,
+                    exc.code,
+                    response_body[:500],
+                )
                 if exc.code in {404, 405, 501}:
                     continue
                 raise DataEntrySyncError(

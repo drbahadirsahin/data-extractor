@@ -142,6 +142,69 @@ class GuiDataEntryFormTests(unittest.TestCase):
         self.assertNotIn("first", values)
         self.assertEqual(values["second"], "B")
 
+    def test_multiple_forms_are_rendered_as_tabs(self) -> None:
+        get_qapplication()
+        form = DataEntryFormWidget(
+            FormRenderModel(
+                project_id="17",
+                record="1",
+                title="Record 1",
+                sections=[
+                    FormSectionModel(
+                        form_name="a",
+                        title="Form A",
+                        fields=[FormFieldModel("a1", "a", "A1", "text")],
+                    ),
+                    FormSectionModel(
+                        form_name="b",
+                        title="Form B",
+                        fields=[FormFieldModel("b1", "b", "B1", "text")],
+                    ),
+                ],
+            )
+        )
+        from PySide6.QtWidgets import QTabWidget
+
+        tabs = form.widget.findChild(QTabWidget, "DataEntryFormTabs")
+
+        self.assertIsNotNone(tabs)
+        self.assertEqual(tabs.count(), 2)
+        self.assertEqual(tabs.tabText(0), "Form A")
+        self.assertEqual(tabs.tabText(1), "Form B")
+
+    def test_simple_branching_logic_hides_and_shows_fields(self) -> None:
+        get_qapplication()
+        form = DataEntryFormWidget(
+            FormRenderModel(
+                project_id="17",
+                record="1",
+                title="Record 1",
+                sections=[
+                    FormSectionModel(
+                        form_name="form",
+                        title="Form",
+                        fields=[
+                            FormFieldModel("has_detail", "form", "Has detail", "text", value=""),
+                            FormFieldModel(
+                                "detail",
+                                "form",
+                                "Detail",
+                                "text",
+                                value="",
+                                branching_logic="[has_detail] = '1'",
+                            ),
+                        ],
+                    )
+                ],
+            )
+        )
+
+        self.assertTrue(form.field_rows["detail"].isHidden())
+
+        form.editor_widgets["has_detail"].setText("1")
+
+        self.assertFalse(form.field_rows["detail"].isHidden())
+
 
 if __name__ == "__main__":
     unittest.main()

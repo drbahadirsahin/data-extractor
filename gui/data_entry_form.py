@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from data_entry_form_model import (
@@ -26,26 +27,36 @@ class DataEntryFormWidget:
         self.layout.setContentsMargins(0, 0, 0, 0)
         self.layout.setSpacing(14)
         self.editor_widgets: dict[str, Any] = {}
+        self.field_rows: dict[str, Any] = {}
         self.model: FormRenderModel | None = None
         if model is not None:
             self.set_model(model)
 
     def set_model(self, model: FormRenderModel) -> None:
-        from PySide6.QtWidgets import QLabel
+        from PySide6.QtWidgets import QLabel, QTabWidget
 
         clear_layout(self.layout)
         self.editor_widgets = {}
+        self.field_rows = {}
         self.model = model
 
         header = QLabel(model.title)
         header.setObjectName("DataEntryRecordTitle")
         header.setWordWrap(True)
         self.layout.addWidget(header)
-        for section in model.sections:
-            self.layout.addWidget(self.build_section_widget(section), 0)
+        if len(model.sections) > 1:
+            tabs = QTabWidget()
+            tabs.setObjectName("DataEntryFormTabs")
+            for section in model.sections:
+                tabs.addTab(self.build_section_widget(section, show_title=False), section.title)
+            self.layout.addWidget(tabs, 1)
+        else:
+            for section in model.sections:
+                self.layout.addWidget(self.build_section_widget(section), 0)
         self.layout.addStretch(1)
+        self.update_branching_visibility()
 
-    def build_section_widget(self, section: Any) -> Any:
+    def build_section_widget(self, section: Any, *, show_title: bool = True) -> Any:
         from PySide6.QtWidgets import QFrame, QLabel, QVBoxLayout
 
         frame = QFrame()
@@ -53,12 +64,14 @@ class DataEntryFormWidget:
         layout = QVBoxLayout(frame)
         layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(10)
-        title = QLabel(section.title)
-        title.setObjectName("SectionTitle")
-        title.setWordWrap(True)
-        layout.addWidget(title)
+        if show_title:
+            title = QLabel(section.title)
+            title.setObjectName("SectionTitle")
+            title.setWordWrap(True)
+            layout.addWidget(title)
         for field in section.fields:
             layout.addWidget(self.build_field_row(field), 0)
+        layout.addStretch(1)
         return frame
 
     def build_field_row(self, field: FormFieldModel) -> Any:
@@ -89,6 +102,7 @@ class DataEntryFormWidget:
             branching.setObjectName("DataEntryBranchingLogic")
             branching.setWordWrap(True)
             layout.addWidget(branching)
+        self.field_rows[field.field_name] = row
         return row
 
     def build_editor(self, field: FormFieldModel) -> Any:
@@ -111,6 +125,8 @@ class DataEntryFormWidget:
         editor.setObjectName("DataEntryLineEdit")
         editor.setProperty("field_name", field.field_name)
         editor.setReadOnly(field.read_only)
+        configure_line_edit_validation(editor, field)
+        editor.textChanged.connect(lambda _text=None: self.update_branching_visibility())
         self.editor_widgets[field.field_name] = editor
         return editor
 
@@ -122,6 +138,7 @@ class DataEntryFormWidget:
         editor.setProperty("field_name", field.field_name)
         editor.setMinimumHeight(96)
         editor.setReadOnly(field.read_only)
+        editor.textChanged.connect(self.update_branching_visibility)
         self.editor_widgets[field.field_name] = editor
         return editor
 
@@ -138,6 +155,7 @@ class DataEntryFormWidget:
         if index >= 0:
             editor.setCurrentIndex(index)
         editor.setEnabled(not field.read_only)
+        editor.currentIndexChanged.connect(lambda _index=None: self.update_branching_visibility())
         self.editor_widgets[field.field_name] = editor
         return editor
 
@@ -156,6 +174,7 @@ class DataEntryFormWidget:
             button.setProperty("choice_code", choice.code)
             button.setChecked(choice.code == field.value_text)
             button.setEnabled(not field.read_only)
+            button.toggled.connect(lambda _checked=False: self.update_branching_visibility())
             group.addButton(button)
             layout.addWidget(button)
         frame._data_entry_button_group = group
@@ -177,6 +196,7 @@ class DataEntryFormWidget:
             checkbox.setProperty("choice_code", choice.code)
             checkbox.setChecked(choice.code in selected)
             checkbox.setEnabled(not field.read_only)
+            checkbox.toggled.connect(lambda _checked=False: self.update_branching_visibility())
             boxes.append(checkbox)
             layout.addWidget(checkbox)
         self.editor_widgets[field.field_name] = boxes
@@ -192,12 +212,15 @@ class DataEntryFormWidget:
         self.editor_widgets[field.field_name] = label
         return label
 
-    def collect_values(self) -> dict[str, Any]:
+    def collect_values(self, *, include_hidden: bool = False) -> dict[str, Any]:
         if self.model is None:
             return {}
         values: dict[str, Any] = {}
         for field in self.model.fields:
             widget = self.editor_widgets.get(field.field_name)
+            row = self.field_rows.get(field.field_name)
+            if not include_hidden and row is not None and row.isHidden():
+                continue
             if widget is None or field.read_only or field.editor == DESCRIPTION_EDITOR:
                 continue
             if field.editor == TEXT_AREA_EDITOR:
@@ -222,6 +245,16 @@ class DataEntryFormWidget:
             return None
         return build_form_change_set(self.model, self.collect_values())
 
+    def update_branching_visibility(self) -> None:
+        if self.model is None:
+            return
+        values = self.collect_values(include_hidden=True)
+        for field in self.model.fields:
+            row = self.field_rows.get(field.field_name)
+            if row is None or not field.branching_logic:
+                continue
+            row.setVisible(evaluate_branching_logic(field.branching_logic, values))
+
 
 def clear_layout(layout: Any) -> None:
     while layout.count():
@@ -232,3 +265,83 @@ def clear_layout(layout: Any) -> None:
             widget.deleteLater()
         elif child_layout is not None:
             clear_layout(child_layout)
+
+
+def configure_line_edit_validation(editor: Any, field: FormFieldModel) -> None:
+    from PySide6.QtGui import QDoubleValidator, QIntValidator
+
+    validation = str(field.validation or "").strip().lower()
+    if validation == "integer":
+        validator = QIntValidator(editor)
+        if field.validation_min not in {None, ""}:
+            validator.setBottom(int(float(str(field.validation_min))))
+        if field.validation_max not in {None, ""}:
+            validator.setTop(int(float(str(field.validation_max))))
+        editor.setValidator(validator)
+        return
+    if validation in {"number", "float"}:
+        validator = QDoubleValidator(editor)
+        if field.validation_min not in {None, ""}:
+            validator.setBottom(float(str(field.validation_min)))
+        if field.validation_max not in {None, ""}:
+            validator.setTop(float(str(field.validation_max)))
+        editor.setValidator(validator)
+        return
+    if validation.startswith("date"):
+        editor.setPlaceholderText("YYYY-MM-DD")
+
+
+def evaluate_branching_logic(logic: str, values: dict[str, Any]) -> bool:
+    text = str(logic or "").strip()
+    if not text:
+        return True
+    or_parts = re.split(r"\s+(?:or|OR)\s+", text)
+    return any(evaluate_branching_and_group(part, values) for part in or_parts if part.strip())
+
+
+def evaluate_branching_and_group(text: str, values: dict[str, Any]) -> bool:
+    parts = re.split(r"\s+(?:and|AND)\s+", text)
+    results = [evaluate_branching_clause(part, values) for part in parts if part.strip()]
+    return all(results) if results else True
+
+
+def evaluate_branching_clause(clause: str, values: dict[str, Any]) -> bool:
+    cleaned = clause.strip().strip("() ")
+    match = re.fullmatch(
+        r"\[([A-Za-z0-9_]+)(?:\(([^)]+)\))?\]\s*(=|<>|!=|>=|<=|>|<)\s*(?:'([^']*)'|\"([^\"]*)\"|([^\s]+))",
+        cleaned,
+    )
+    if not match:
+        return True
+    field_name, checkbox_code, operator, quoted_single, quoted_double, bare_value = match.groups()
+    expected = quoted_single if quoted_single is not None else quoted_double if quoted_double is not None else bare_value
+    key = f"{field_name}___{checkbox_code}" if checkbox_code else field_name
+    actual = values.get(key, "")
+    return compare_branching_values(str(actual or ""), operator, str(expected or ""))
+
+
+def compare_branching_values(actual: str, operator: str, expected: str) -> bool:
+    if operator in {"=", "=="}:
+        return actual == expected
+    if operator in {"<>", "!="}:
+        return actual != expected
+    actual_number = parse_float(actual)
+    expected_number = parse_float(expected)
+    if actual_number is None or expected_number is None:
+        return True
+    if operator == ">":
+        return actual_number > expected_number
+    if operator == ">=":
+        return actual_number >= expected_number
+    if operator == "<":
+        return actual_number < expected_number
+    if operator == "<=":
+        return actual_number <= expected_number
+    return True
+
+
+def parse_float(value: str) -> float | None:
+    try:
+        return float(str(value).replace(",", "."))
+    except ValueError:
+        return None

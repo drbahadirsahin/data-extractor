@@ -96,6 +96,23 @@ class DataEntryFormModelTests(unittest.TestCase):
         self.assertEqual(model.fields[1].editor, DESCRIPTION_EDITOR)
         self.assertEqual(model.fields[1].value, "Read this text")
 
+    def test_hides_hidden_annotation_and_marks_readonly_annotation(self) -> None:
+        detail = RecordDetail(project_id="17", record="1")
+        fields = {
+            "form": [
+                FieldSpec("secret", "form", "text", "Secret", field_annotation=["@HIDDEN"]),
+                FieldSpec("locked", "form", "text", "Locked", field_annotation=["@READONLY"]),
+                FieldSpec("visible", "form", "text", "Visible"),
+            ]
+        }
+
+        model = build_form_render_model(detail, fields)
+        by_name = {field.field_name: field for field in model.fields}
+
+        self.assertNotIn("secret", by_name)
+        self.assertTrue(by_name["locked"].read_only)
+        self.assertIn("visible", by_name)
+
     def test_accepts_dict_metadata_with_required_and_branching_logic(self) -> None:
         detail = RecordDetail(project_id="17", record="1")
         fields = {

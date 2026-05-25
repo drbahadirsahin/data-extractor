@@ -14,7 +14,9 @@ from data_entry_sync_client import DataEntrySyncClient, load_data_entry_sync_con
 from data_entry_sync_service import DataEntrySyncService
 from gui.data_entry_form import DataEntryFormWidget
 from gui.i18n import tr
+from identity_registry_client import IdentityRegistryClient, load_identity_registry_config
 from settings_store import RedcapProjectToken
+from submission_service import normalize_tc_identity_no
 from workspace_flow import WorkspaceBundle, load_workspace_bundle
 
 
@@ -283,9 +285,7 @@ class ClinicalDataEntryPage:
         self.save_button.setEnabled(True)
         self.status_label.setText(tr("data_entry_record_opened", self.language, record=record))
 
-    def open_new_record(self, record_id: str | None = None) -> None:
-        from PySide6.QtWidgets import QInputDialog
-
+    def open_new_record(self, tc_identity_no: str | None = None, dag_option: dict[str, Any] | None = None) -> None:
         project = current_redcap_project_token(self.runtime.settings)
         if project is None:
             self.status_label.setText(tr("data_entry_connect_first", self.language))
@@ -295,18 +295,38 @@ class ClinicalDataEntryPage:
         if self.bundle is None:
             self.status_label.setText(tr("data_entry_metadata_missing", self.language))
             return
-        if record_id is None:
-            entered, ok = QInputDialog.getText(
-                self.widget,
-                tr("data_entry_new_record_title", self.language),
-                tr("data_entry_new_record_label", self.language),
-            )
-            if not ok:
+        if tc_identity_no is None:
+            request = prompt_for_new_record(self.widget, project, self.language)
+            if request is None:
                 return
-            record_id = entered
-        record_id = str(record_id or "").strip()
+            tc_identity_no = request["tc_identity_no"]
+            dag_option = request.get("dag_option")
+        normalized_tc = normalize_tc_identity_no(tc_identity_no)
+        if not normalized_tc:
+            self.status_label.setText(tr("data_entry_new_record_missing_tc", self.language))
+            return
+        if dag_option is not None and not activate_dag_for_new_record(self, dag_option):
+            return
+        project = current_redcap_project_token(self.runtime.settings)
+        if project is None:
+            self.status_label.setText(tr("data_entry_connect_first", self.language))
+            return
+        token = self.runtime.secrets_store.get(project.token_secret_name)
+        if not token:
+            self.status_label.setText(tr("data_entry_missing_token", self.language))
+            return
+        try:
+            identity_config = load_identity_registry_config(self.runtime.app_config)
+            if not identity_config.api_url:
+                identity_config.api_url = project.api_url
+            identity_client = IdentityRegistryClient(identity_config, token)
+            create_result = identity_client.create_record_by_tc(normalized_tc)
+        except Exception as exc:
+            self.status_label.setText(tr("data_entry_new_record_create_failed", self.language, error=str(exc)))
+            return
+        record_id = str(create_result.record_id or "").strip()
         if not record_id:
-            self.status_label.setText(tr("data_entry_new_record_missing", self.language))
+            self.status_label.setText(tr("data_entry_new_record_create_failed", self.language, error="record_id missing"))
             return
         detail = RecordDetail(
             project_id=project.project_id,
@@ -323,7 +343,14 @@ class ClinicalDataEntryPage:
         self.form_widget.set_model(self.current_model)
         self.record_list.clearSelection()
         self.save_button.setEnabled(True)
-        self.status_label.setText(tr("data_entry_new_record_ready", self.language, record=record_id))
+        self.status_label.setText(
+            tr(
+                "data_entry_new_record_ready",
+                self.language,
+                record=record_id,
+                tc=mask_tc_identity(normalized_tc),
+            )
+        )
 
     def save_current_record(self) -> None:
         if self.current_model is None:
@@ -357,7 +384,17 @@ class ClinicalDataEntryPage:
         self.sync_button.setEnabled(False)
         self.refresh_button.setEnabled(False)
         self.sync_progress.setVisible(True)
-        self.status_label.setText(tr("data_entry_sync_running", self.language))
+        sync_config = load_data_entry_sync_config(self.runtime.app_config, api_url=project.api_url)
+        self.status_label.setText(
+            tr(
+                "data_entry_sync_running_detail",
+                self.language,
+                prefix=sync_config.prefix,
+                manifest=sync_config.manifest_action,
+                data=sync_config.record_data_action,
+                hashes=sync_config.identity_hash_action,
+            )
+        )
         thread = QThread(self.widget)
         worker = DataEntrySyncWorker(
             store_path=self.store.db_path,
@@ -393,6 +430,7 @@ class ClinicalDataEntryPage:
             tr(
                 "data_entry_sync_done",
                 self.language,
+                manifest=getattr(report, "manifest_records", 0),
                 pulled=len(getattr(report, "pulled_records", []) or []),
                 conflicts=len(getattr(report, "conflict_records", []) or []),
                 values=getattr(report, "values_updated", 0),
@@ -461,3 +499,82 @@ def select_record_in_list(record_list: Any, record: str) -> None:
         if str(item.data(Qt.ItemDataRole.UserRole)) == str(record):
             record_list.setCurrentRow(index)
             return
+
+
+def prompt_for_new_record(parent: Any, project: RedcapProjectToken, language: str) -> dict[str, Any] | None:
+    from PySide6.QtWidgets import QComboBox, QDialog, QDialogButtonBox, QFormLayout, QLineEdit, QVBoxLayout
+
+    from gui.clinical_main_window import dag_option_label, normalize_dag_option
+
+    dialog = QDialog(parent)
+    dialog.setWindowTitle(tr("data_entry_new_record_title", language))
+    layout = QVBoxLayout(dialog)
+    form = QFormLayout()
+    tc_input = QLineEdit("")
+    tc_input.setPlaceholderText("12345678901")
+    form.addRow(tr("data_entry_new_record_tc_label", language), tc_input)
+
+    dag_combo = QComboBox()
+    normalized_options = [
+        normalize_dag_option(option, project)
+        for option in (project.available_data_access_groups or [])
+        if isinstance(option, dict)
+    ]
+    can_choose_dag = bool(project.can_switch_data_access_group) and len(normalized_options) > 1
+    if can_choose_dag:
+        for option in normalized_options:
+            if not option.get("switchable") and not option.get("active"):
+                continue
+            dag_combo.addItem(dag_option_label(option, language), option)
+        form.addRow(tr("data_entry_new_record_dag_label", language), dag_combo)
+    layout.addLayout(form)
+    buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+    buttons.accepted.connect(dialog.accept)
+    buttons.rejected.connect(dialog.reject)
+    layout.addWidget(buttons)
+    if dialog.exec() != QDialog.DialogCode.Accepted:
+        return None
+    return {
+        "tc_identity_no": tc_input.text().strip(),
+        "dag_option": dag_combo.currentData() if can_choose_dag else None,
+    }
+
+
+def activate_dag_for_new_record(page: ClinicalDataEntryPage, option: dict[str, Any]) -> bool:
+    if option.get("active"):
+        return True
+    if not option.get("switchable"):
+        page.status_label.setText(tr("data_entry_new_record_dag_not_switchable", page.language))
+        return False
+    if page.change_dag is None:
+        page.status_label.setText(tr("data_entry_new_record_dag_switch_failed", page.language))
+        return False
+    before = current_redcap_project_token(page.runtime.settings)
+    page.change_dag(option)
+    after = current_redcap_project_token(page.runtime.settings)
+    if dag_option_matches_project(option, after) and not dag_option_matches_project(option, before):
+        return True
+    if dag_option_matches_project(option, after):
+        return True
+    page.status_label.setText(tr("data_entry_new_record_dag_switch_failed", page.language))
+    return False
+
+
+def dag_option_matches_project(option: dict[str, Any], project: RedcapProjectToken | None) -> bool:
+    if project is None:
+        return False
+    if option.get("no_assignment"):
+        return not project.data_access_group_unique_name and not project.data_access_group_id
+    unique_name = option.get("data_access_group_unique_name")
+    dag_id = option.get("data_access_group_id")
+    return bool(
+        (unique_name and unique_name == project.data_access_group_unique_name)
+        or (dag_id and dag_id == project.data_access_group_id)
+    )
+
+
+def mask_tc_identity(value: str) -> str:
+    cleaned = "".join(ch for ch in str(value) if ch.isdigit())
+    if len(cleaned) < 4:
+        return "***"
+    return f"{cleaned[:2]}*******{cleaned[-2:]}"

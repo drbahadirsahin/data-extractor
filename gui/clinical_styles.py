@@ -390,14 +390,62 @@ QFrame#DataEntryFormSection {
 }
 
 QFrame#DataEntryFieldRow {
-    background: transparent;
-    border-bottom: 1px solid #f0eee8;
-    padding-bottom: 8px;
+    background: #fbfaf7;
+    border: 1px solid #ece7df;
+    border-left: 4px solid #d8d5cc;
+    border-radius: 8px;
+    padding: 9px 10px;
+}
+
+QFrame#DataEntryFieldRow[field_state="filled"] {
+    background: #f1fbf7;
+    border: 1px solid #c9e9df;
+    border-left: 4px solid #0f766e;
+}
+
+QFrame#DataEntryFieldRow[field_state="required_missing"] {
+    background: #fff7ed;
+    border: 1px solid #f1cf9d;
+    border-left: 4px solid #b56a19;
+}
+
+QFrame#DataEntryFieldRow[field_state="info"] {
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-left: 4px solid #94a3b8;
 }
 
 QLabel#DataEntryFieldLabel {
     color: #18202a;
     font-weight: 700;
+}
+
+QLabel#DataEntryFieldState {
+    background: #f2f4f5;
+    color: #607080;
+    border: 1px solid #e0ded7;
+    border-radius: 999px;
+    padding: 3px 8px;
+    font-size: 11px;
+    font-weight: 750;
+}
+
+QLabel#DataEntryFieldState[state="filled"] {
+    background: #dcf7ed;
+    color: #0f766e;
+    border: 1px solid #b7ded5;
+}
+
+QLabel#DataEntryFieldState[state="required_missing"] {
+    background: #fff0d8;
+    color: #9a5718;
+    border: 1px solid #f1cf9d;
+}
+
+QLabel#DataEntryFieldState[state="info"] {
+    background: #eef2f7;
+    color: #536273;
+    border: 1px solid #d8dee8;
 }
 
 QLabel#DataEntryFieldNote, QLabel#DataEntryBranchingLogic {

@@ -90,6 +90,35 @@ class GuiDataEntryFormTests(unittest.TestCase):
             ("risk___2", "1"),
         ])
 
+    def test_field_rows_expose_filled_empty_and_required_missing_states(self) -> None:
+        get_qapplication()
+        form = DataEntryFormWidget(
+            FormRenderModel(
+                project_id="17",
+                record="1",
+                title="Record 1",
+                sections=[
+                    FormSectionModel(
+                        form_name="form",
+                        title="Form",
+                        fields=[
+                            FormFieldModel("filled", "form", "Filled", "text", value="A"),
+                            FormFieldModel("required", "form", "Required", "text", value="", required=True),
+                            FormFieldModel("optional", "form", "Optional", "text", value=""),
+                        ],
+                    )
+                ],
+            )
+        )
+
+        self.assertEqual(form.field_rows["filled"].property("field_state"), "filled")
+        self.assertEqual(form.field_rows["required"].property("field_state"), "required_missing")
+        self.assertEqual(form.field_rows["optional"].property("field_state"), "empty")
+
+        form.editor_widgets["required"].setText("B")
+
+        self.assertEqual(form.field_rows["required"].property("field_state"), "filled")
+
     def test_set_model_replaces_existing_editors(self) -> None:
         get_qapplication()
         form = DataEntryFormWidget(

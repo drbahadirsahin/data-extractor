@@ -15,12 +15,14 @@ from data_entry_form_model import (
     FormFieldModel,
     FormRenderModel,
 )
+from gui.i18n import tr
 
 
 class DataEntryFormWidget:
-    def __init__(self, model: FormRenderModel | None = None) -> None:
+    def __init__(self, model: FormRenderModel | None = None, *, language: str = "tr") -> None:
         from PySide6.QtWidgets import QVBoxLayout, QWidget
 
+        self.language = language
         self.widget = QWidget()
         self.widget.setObjectName("DataEntryForm")
         self.layout = QVBoxLayout(self.widget)
@@ -28,6 +30,8 @@ class DataEntryFormWidget:
         self.layout.setSpacing(14)
         self.editor_widgets: dict[str, Any] = {}
         self.field_rows: dict[str, Any] = {}
+        self.field_models: dict[str, FormFieldModel] = {}
+        self.field_state_labels: dict[str, Any] = {}
         self.form_nav: Any | None = None
         self.form_stack: Any | None = None
         self.model: FormRenderModel | None = None
@@ -41,6 +45,8 @@ class DataEntryFormWidget:
         clear_layout(self.layout)
         self.editor_widgets = {}
         self.field_rows = {}
+        self.field_models = {}
+        self.field_state_labels = {}
         self.form_nav = None
         self.form_stack = None
         self.model = model
@@ -147,7 +153,8 @@ class DataEntryFormWidget:
         return frame
 
     def build_field_row(self, field: FormFieldModel) -> Any:
-        from PySide6.QtWidgets import QFrame, QLabel, QLayout, QSizePolicy, QVBoxLayout
+        from PySide6.QtCore import Qt
+        from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QLayout, QSizePolicy, QVBoxLayout
 
         row = QFrame()
         row.setObjectName("DataEntryFieldRow")
@@ -160,10 +167,21 @@ class DataEntryFormWidget:
         label_text = field.label
         if field.required:
             label_text = f"{label_text} *"
+        header = QHBoxLayout()
+        header.setContentsMargins(0, 0, 0, 0)
+        header.setSpacing(8)
+
         label = QLabel(label_text)
         label.setObjectName("DataEntryFieldLabel")
         label.setWordWrap(True)
-        layout.addWidget(label)
+        header.addWidget(label, 1)
+
+        state_label = QLabel("")
+        state_label.setObjectName("DataEntryFieldState")
+        state_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop)
+        header.addWidget(state_label, 0, Qt.AlignmentFlag.AlignTop)
+        layout.addLayout(header)
+
         if field.note:
             note = QLabel(field.note)
             note.setObjectName("DataEntryFieldNote")
@@ -177,6 +195,9 @@ class DataEntryFormWidget:
             branching.setWordWrap(True)
             layout.addWidget(branching)
         self.field_rows[field.field_name] = row
+        self.field_models[field.field_name] = field
+        self.field_state_labels[field.field_name] = state_label
+        self.update_field_row_state(field.field_name)
         return row
 
     def build_editor(self, field: FormFieldModel) -> Any:
@@ -201,7 +222,7 @@ class DataEntryFormWidget:
         editor.setReadOnly(field.read_only)
         editor.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         configure_line_edit_validation(editor, field)
-        editor.textChanged.connect(lambda _text=None: self.update_branching_visibility())
+        editor.textChanged.connect(lambda _text=None, name=field.field_name: self.handle_field_changed(name))
         self.editor_widgets[field.field_name] = editor
         return editor
 
@@ -213,7 +234,7 @@ class DataEntryFormWidget:
         editor.setProperty("field_name", field.field_name)
         editor.setMinimumHeight(96)
         editor.setReadOnly(field.read_only)
-        editor.textChanged.connect(self.update_branching_visibility)
+        editor.textChanged.connect(lambda name=field.field_name: self.handle_field_changed(name))
         self.editor_widgets[field.field_name] = editor
         return editor
 
@@ -231,7 +252,7 @@ class DataEntryFormWidget:
         if index >= 0:
             editor.setCurrentIndex(index)
         editor.setEnabled(not field.read_only)
-        editor.currentIndexChanged.connect(lambda _index=None: self.update_branching_visibility())
+        editor.currentIndexChanged.connect(lambda _index=None, name=field.field_name: self.handle_field_changed(name))
         self.editor_widgets[field.field_name] = editor
         return editor
 
@@ -250,7 +271,7 @@ class DataEntryFormWidget:
             button.setProperty("choice_code", choice.code)
             button.setChecked(choice.code == field.value_text)
             button.setEnabled(not field.read_only)
-            button.toggled.connect(lambda _checked=False: self.update_branching_visibility())
+            button.toggled.connect(lambda _checked=False, name=field.field_name: self.handle_field_changed(name))
             group.addButton(button)
             layout.addWidget(button)
         frame._data_entry_button_group = group
@@ -272,7 +293,7 @@ class DataEntryFormWidget:
             checkbox.setProperty("choice_code", choice.code)
             checkbox.setChecked(choice.code in selected)
             checkbox.setEnabled(not field.read_only)
-            checkbox.toggled.connect(lambda _checked=False: self.update_branching_visibility())
+            checkbox.toggled.connect(lambda _checked=False, name=field.field_name: self.handle_field_changed(name))
             boxes.append(checkbox)
             layout.addWidget(checkbox)
         self.editor_widgets[field.field_name] = boxes
@@ -341,6 +362,7 @@ class DataEntryFormWidget:
             if self.apply_field_value(field, values[field.field_name]):
                 applied += 1
         self.update_branching_visibility()
+        self.refresh_field_states()
         return applied
 
     def apply_field_value(self, field: FormFieldModel, value: Any) -> bool:
@@ -383,6 +405,49 @@ class DataEntryFormWidget:
             if row is None or not field.branching_logic:
                 continue
             row.setVisible(evaluate_branching_logic(field.branching_logic, values))
+        self.refresh_field_states()
+
+    def handle_field_changed(self, field_name: str) -> None:
+        self.update_field_row_state(field_name)
+        self.update_branching_visibility()
+
+    def refresh_field_states(self) -> None:
+        for field_name in list(self.field_rows):
+            self.update_field_row_state(field_name)
+
+    def update_field_row_state(self, field_name: str) -> None:
+        field = self.field_models.get(field_name)
+        row = self.field_rows.get(field_name)
+        state_label = self.field_state_labels.get(field_name)
+        if field is None or row is None or state_label is None:
+            return
+        state = field_state(field, self.current_field_value(field))
+        row.setProperty("field_state", state)
+        state_label.setProperty("state", state)
+        state_label.setText(field_state_label(state, self.language))
+        repolish(row)
+        repolish(state_label)
+
+    def current_field_value(self, field: FormFieldModel) -> Any:
+        widget = self.editor_widgets.get(field.field_name)
+        if widget is None:
+            return field.value
+        if field.editor == TEXT_AREA_EDITOR:
+            return widget.toPlainText()
+        if field.editor == TEXT_EDITOR:
+            return widget.text()
+        if field.editor in {DROPDOWN_EDITOR, DYNAMIC_DROPDOWN_EDITOR}:
+            return widget.currentData()
+        if field.editor == RADIO_EDITOR:
+            checked = widget.checkedButton()
+            return checked.property("choice_code") if checked is not None else ""
+        if field.editor == CHECKBOX_EDITOR:
+            return [
+                checkbox.property("choice_code")
+                for checkbox in widget
+                if checkbox.isChecked()
+            ]
+        return field.value
 
 
 def clear_layout(layout: Any) -> None:
@@ -402,6 +467,38 @@ def field_uses_full_width(field: FormFieldModel) -> bool:
         or field.branching_logic
         or len(str(field.label or "")) > 64
     )
+
+
+def field_state(field: FormFieldModel, value: Any) -> str:
+    if field.editor == DESCRIPTION_EDITOR:
+        return "info"
+    if field_value_is_filled(value):
+        return "filled"
+    if field.required:
+        return "required_missing"
+    return "empty"
+
+
+def field_state_label(state: str, language: str = "tr") -> str:
+    if state == "filled":
+        return tr("data_entry_field_state_filled", language)
+    if state == "required_missing":
+        return tr("data_entry_field_state_required_missing", language)
+    if state == "info":
+        return tr("data_entry_field_state_info", language)
+    return tr("data_entry_field_state_empty", language)
+
+
+def field_value_is_filled(value: Any) -> bool:
+    if isinstance(value, list):
+        return any(str(item or "").strip() for item in value)
+    return str(value or "").strip() != ""
+
+
+def repolish(widget: Any) -> None:
+    style = widget.style()
+    style.unpolish(widget)
+    style.polish(widget)
 
 
 def nav_title_for_section(section: Any) -> str:

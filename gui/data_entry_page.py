@@ -3,13 +3,14 @@ from __future__ import annotations
 from copy import deepcopy
 import logging
 from pathlib import Path
+import time
 from typing import Any, Callable
 
 from PySide6.QtCore import QObject, Qt, QThread, Signal, Slot
 
 from data_entry_browser import DataEntryRecordBrowser, RecordDetail
 from data_entry_form_changes import apply_form_changes
-from data_entry_form_model import build_form_render_model
+from data_entry_form_model import DESCRIPTION_EDITOR, READONLY_EDITOR, build_form_render_model
 from data_entry_store import DataEntryStore
 from data_entry_sync_client import DataEntrySyncClient, load_data_entry_sync_config
 from data_entry_sync_service import DataEntrySyncService
@@ -56,11 +57,17 @@ class DataEntryAIFillWorker(QObject):
         *,
         config: Any,
         form_name: str,
+        field_names: list[str],
+        form_prompt_append: str = "",
+        field_prompt_appends: dict[str, str] | None = None,
         documents: list[str],
     ) -> None:
         super().__init__()
         self.config = config
         self.form_name = form_name
+        self.field_names = field_names
+        self.form_prompt_append = form_prompt_append
+        self.field_prompt_appends = field_prompt_appends or {}
         self.documents = documents
 
     @Slot()
@@ -68,15 +75,14 @@ class DataEntryAIFillWorker(QObject):
         try:
             scoped_config = deepcopy(self.config)
             scoped_config.target_forms = [self.form_name]
-            scoped_config.target_fields = []
-            result = extract_patient_documents(
-                config=scoped_config,
-                queue_label="data_entry_ai_fill",
-                patient_mode="existing",
-                identifier_type=None,
-                identifier_value=None,
-                documents=self.documents,
+            scoped_config.target_fields = list(self.field_names)
+            apply_ai_fill_overrides(
+                scoped_config,
+                form_name=self.form_name,
+                form_prompt_append=self.form_prompt_append,
+                field_prompt_appends=self.field_prompt_appends,
             )
+            result = self.extract_with_retry(scoped_config)
             values: dict[str, Any] = {}
             for field_result in result.merged_response.results:
                 if field_result.final_value is None or field_result.status == "not_found":
@@ -86,6 +92,28 @@ class DataEntryAIFillWorker(QObject):
             self.failed.emit(str(exc))
             return
         self.finished.emit(values)
+
+    def extract_with_retry(self, scoped_config: Any) -> Any:
+        last_error: Exception | None = None
+        for attempt in range(2):
+            try:
+                return extract_patient_documents(
+                    config=scoped_config,
+                    queue_label="data_entry_ai_fill",
+                    patient_mode="existing",
+                    identifier_type=None,
+                    identifier_value=None,
+                    documents=self.documents,
+                )
+            except Exception as exc:
+                last_error = exc
+                if attempt == 0 and is_retryable_llm_error(exc):
+                    time.sleep(2)
+                    continue
+                raise
+        if last_error is not None:
+            raise last_error
+        raise RuntimeError("LLM extraction did not return a result.")
 
 
 class ClinicalDataEntryPage:
@@ -197,7 +225,7 @@ class ClinicalDataEntryPage:
         right_layout = QVBoxLayout(right_panel)
         right_layout.setContentsMargins(0, 0, 0, 0)
         right_layout.setSpacing(10)
-        self.form_widget = DataEntryFormWidget()
+        self.form_widget = DataEntryFormWidget(language=self.language)
         right_layout.addWidget(self.form_widget.widget, 1)
         action_row = QHBoxLayout()
         action_row.setSpacing(10)
@@ -511,12 +539,23 @@ class ClinicalDataEntryPage:
         )
         if not documents:
             return
-        field_names = {field.field_name for field in section.fields}
+        fill_options = prompt_ai_fill_options(
+            self.widget,
+            section=section,
+            documents=[str(path) for path in documents],
+            language=self.language,
+        )
+        if fill_options is None:
+            return
+        field_names = set(fill_options["field_names"])
         thread = QThread(self.widget)
         worker = DataEntryAIFillWorker(
             config=self.bundle.config,
             form_name=section.form_name,
-            documents=[str(path) for path in documents],
+            field_names=list(fill_options["field_names"]),
+            form_prompt_append=str(fill_options.get("form_prompt_append") or ""),
+            field_prompt_appends=dict(fill_options.get("field_prompt_appends") or {}),
+            documents=list(fill_options["documents"]),
         )
         worker.moveToThread(thread)
         self._ai_thread = thread
@@ -747,6 +786,287 @@ def redcap_repeat_instrument_for_change(change: dict[str, Any], field: Any, bund
         return ""
     repeating_forms = set(bundle.config.repeating_forms or [])
     return field.form_name if field.form_name in repeating_forms else ""
+
+
+def prompt_ai_fill_options(
+    parent: Any,
+    *,
+    section: Any,
+    documents: list[str],
+    language: str,
+) -> dict[str, Any] | None:
+    from PySide6.QtWidgets import (
+        QDialog,
+        QDialogButtonBox,
+        QFrame,
+        QHBoxLayout,
+        QLabel,
+        QListWidget,
+        QListWidgetItem,
+        QPlainTextEdit,
+        QPushButton,
+        QSplitter,
+        QVBoxLayout,
+    )
+
+    fields = [field for field in getattr(section, "fields", []) if field_is_ai_fillable(field)]
+    if not fields:
+        return None
+
+    dialog = QDialog(parent)
+    dialog.setWindowTitle(tr("data_entry_ai_fill_options_title", language))
+    dialog.setMinimumSize(760, 600)
+    layout = QVBoxLayout(dialog)
+    layout.setContentsMargins(16, 16, 16, 16)
+    layout.setSpacing(12)
+
+    title = QLabel(tr("data_entry_ai_fill_options_title", language))
+    title.setObjectName("TitleLabel")
+    layout.addWidget(title)
+
+    body = QLabel(tr("data_entry_ai_fill_options_body", language, form=getattr(section, "title", "")))
+    body.setObjectName("MutedLabel")
+    body.setWordWrap(True)
+    layout.addWidget(body)
+
+    document_label = QLabel(
+        tr(
+            "data_entry_ai_fill_documents",
+            language,
+            count=len(documents),
+            files=", ".join(Path(path).name for path in documents[:3])
+            + ("..." if len(documents) > 3 else ""),
+        )
+    )
+    document_label.setObjectName("MutedLabel")
+    document_label.setWordWrap(True)
+    layout.addWidget(document_label)
+
+    content_splitter = QSplitter()
+    content_splitter.setOrientation(Qt.Orientation.Horizontal)
+
+    left_panel = QFrame()
+    left_panel.setObjectName("PanelCard")
+    left_layout = QVBoxLayout(left_panel)
+    left_layout.setContentsMargins(12, 12, 12, 12)
+    left_layout.setSpacing(8)
+
+    fields_title = QLabel(tr("data_entry_ai_fill_fields_title", language))
+    fields_title.setObjectName("SectionLabel")
+    left_layout.addWidget(fields_title)
+
+    field_list = QListWidget()
+    field_list.setObjectName("DataEntryAIFillFieldList")
+    field_list.setWordWrap(True)
+    field_by_name: dict[str, Any] = {}
+    for field in fields:
+        field_by_name[field.field_name] = field
+        item = QListWidgetItem(ai_fill_field_item_text(field, language))
+        item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+        item.setData(Qt.ItemDataRole.UserRole, field.field_name)
+        item.setToolTip(f"{field.label}\n{field.field_name}")
+        item.setCheckState(Qt.CheckState.Unchecked if field_currently_filled(field) else Qt.CheckState.Checked)
+        field_list.addItem(item)
+    left_layout.addWidget(field_list, 1)
+
+    selection_row = QHBoxLayout()
+    select_empty_button = QPushButton(tr("data_entry_ai_fill_select_empty", language))
+    select_empty_button.setProperty("secondary", True)
+    select_all_button = QPushButton(tr("data_entry_ai_fill_select_all", language))
+    select_all_button.setProperty("secondary", True)
+    clear_button = QPushButton(tr("data_entry_ai_fill_clear", language))
+    clear_button.setProperty("secondary", True)
+    selection_row.addWidget(select_empty_button)
+    selection_row.addWidget(select_all_button)
+    selection_row.addWidget(clear_button)
+    left_layout.addLayout(selection_row)
+
+    right_panel = QFrame()
+    right_panel.setObjectName("PanelCard")
+    right_layout = QVBoxLayout(right_panel)
+    right_layout.setContentsMargins(12, 12, 12, 12)
+    right_layout.setSpacing(8)
+
+    form_rule_label = QLabel(tr("data_entry_ai_fill_form_rule", language))
+    form_rule_label.setObjectName("SectionLabel")
+    right_layout.addWidget(form_rule_label)
+    form_rule_input = QPlainTextEdit()
+    form_rule_input.setObjectName("DataEntryRuleInput")
+    form_rule_input.setPlaceholderText(tr("data_entry_ai_fill_form_rule_placeholder", language))
+    form_rule_input.setMinimumHeight(84)
+    right_layout.addWidget(form_rule_input)
+
+    field_rule_label = QLabel(tr("data_entry_ai_fill_field_rule", language))
+    field_rule_label.setObjectName("SectionLabel")
+    right_layout.addWidget(field_rule_label)
+    selected_field_label = QLabel(tr("data_entry_ai_fill_no_field_rule_target", language))
+    selected_field_label.setObjectName("MutedLabel")
+    selected_field_label.setWordWrap(True)
+    right_layout.addWidget(selected_field_label)
+    field_rule_input = QPlainTextEdit()
+    field_rule_input.setObjectName("DataEntryRuleInput")
+    field_rule_input.setPlaceholderText(tr("data_entry_ai_fill_field_rule_placeholder", language))
+    field_rule_input.setMinimumHeight(120)
+    right_layout.addWidget(field_rule_input, 1)
+
+    content_splitter.addWidget(left_panel)
+    content_splitter.addWidget(right_panel)
+    content_splitter.setStretchFactor(0, 1)
+    content_splitter.setStretchFactor(1, 1)
+    layout.addWidget(content_splitter, 1)
+
+    warning = QLabel("")
+    warning.setObjectName("WarningPill")
+    warning.setWordWrap(True)
+    warning.setVisible(False)
+    layout.addWidget(warning)
+
+    field_rules: dict[str, str] = {}
+    current_rule_field: str | None = None
+
+    def save_current_field_rule() -> None:
+        nonlocal current_rule_field
+        if current_rule_field:
+            field_rules[current_rule_field] = field_rule_input.toPlainText().strip()
+
+    def load_current_field_rule(current: Any, _previous: Any = None) -> None:
+        nonlocal current_rule_field
+        save_current_field_rule()
+        if current is None:
+            current_rule_field = None
+            selected_field_label.setText(tr("data_entry_ai_fill_no_field_rule_target", language))
+            field_rule_input.setPlainText("")
+            field_rule_input.setEnabled(False)
+            return
+        field_name = str(current.data(Qt.ItemDataRole.UserRole))
+        current_rule_field = field_name
+        field = field_by_name[field_name]
+        selected_field_label.setText(f"{field.label} ({field.field_name})")
+        field_rule_input.setEnabled(True)
+        field_rule_input.setPlainText(field_rules.get(field_name, ""))
+
+    def set_checked(mode: str) -> None:
+        for index in range(field_list.count()):
+            item = field_list.item(index)
+            field_name = str(item.data(Qt.ItemDataRole.UserRole))
+            field = field_by_name[field_name]
+            if mode == "all":
+                checked = True
+            elif mode == "empty":
+                checked = not field_currently_filled(field)
+            else:
+                checked = False
+            item.setCheckState(Qt.CheckState.Checked if checked else Qt.CheckState.Unchecked)
+
+    def selected_field_names() -> list[str]:
+        names: list[str] = []
+        for index in range(field_list.count()):
+            item = field_list.item(index)
+            if item.checkState() == Qt.CheckState.Checked:
+                names.append(str(item.data(Qt.ItemDataRole.UserRole)))
+        return names
+
+    def accept_if_valid() -> None:
+        save_current_field_rule()
+        if not selected_field_names():
+            warning.setText(tr("data_entry_ai_fill_no_fields_selected", language))
+            warning.setVisible(True)
+            return
+        dialog.accept()
+
+    field_list.currentItemChanged.connect(load_current_field_rule)
+    select_empty_button.clicked.connect(lambda _checked=False: set_checked("empty"))
+    select_all_button.clicked.connect(lambda _checked=False: set_checked("all"))
+    clear_button.clicked.connect(lambda _checked=False: set_checked("clear"))
+    if field_list.count():
+        field_list.setCurrentRow(0)
+
+    buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+    ok_button = buttons.button(QDialogButtonBox.StandardButton.Ok)
+    if ok_button is not None:
+        ok_button.setText(tr("data_entry_ai_fill_start", language))
+        ok_button.setAutoDefault(False)
+        ok_button.setDefault(False)
+    cancel_button = buttons.button(QDialogButtonBox.StandardButton.Cancel)
+    if cancel_button is not None:
+        cancel_button.setText(tr("cancel_button", language))
+    buttons.accepted.connect(accept_if_valid)
+    buttons.rejected.connect(dialog.reject)
+    layout.addWidget(buttons)
+
+    if dialog.exec() != QDialog.DialogCode.Accepted:
+        return None
+
+    chosen_fields = selected_field_names()
+    return {
+        "documents": documents,
+        "field_names": chosen_fields,
+        "form_prompt_append": form_rule_input.toPlainText().strip(),
+        "field_prompt_appends": {
+            field_name: prompt
+            for field_name, prompt in field_rules.items()
+            if field_name in chosen_fields and prompt
+        },
+    }
+
+
+def field_is_ai_fillable(field: Any) -> bool:
+    return not bool(getattr(field, "read_only", False)) and getattr(field, "editor", "") not in {
+        DESCRIPTION_EDITOR,
+        READONLY_EDITOR,
+    }
+
+
+def field_currently_filled(field: Any) -> bool:
+    from gui.data_entry_form import field_value_is_filled
+
+    return field_value_is_filled(getattr(field, "value", ""))
+
+
+def ai_fill_field_item_text(field: Any, language: str = "tr") -> str:
+    status = (
+        tr("data_entry_field_state_filled", language)
+        if field_currently_filled(field)
+        else tr("data_entry_field_state_empty", language)
+    )
+    required = (
+        f" · {tr('data_entry_field_state_required_short', language)}"
+        if bool(getattr(field, "required", False))
+        else ""
+    )
+    return f"{field.label}\n{field.field_name} · {status}{required}"
+
+
+def apply_ai_fill_overrides(
+    config: Any,
+    *,
+    form_name: str,
+    form_prompt_append: str,
+    field_prompt_appends: dict[str, str],
+) -> None:
+    if form_prompt_append:
+        form_override = dict((getattr(config, "form_overrides", {}) or {}).get(form_name, {}) or {})
+        form_override["prompt_append"] = merge_prompt_append(form_override.get("prompt_append"), form_prompt_append)
+        config.form_overrides[form_name] = form_override
+    for field_name, prompt_append in field_prompt_appends.items():
+        if not prompt_append:
+            continue
+        field_override = dict((getattr(config, "field_overrides", {}) or {}).get(field_name, {}) or {})
+        field_override["prompt_append"] = merge_prompt_append(field_override.get("prompt_append"), prompt_append)
+        config.field_overrides[field_name] = field_override
+
+
+def merge_prompt_append(existing: Any, addition: str) -> str:
+    existing_text = str(existing or "").strip()
+    addition_text = str(addition or "").strip()
+    if existing_text and addition_text:
+        return f"{existing_text}\n{addition_text}"
+    return existing_text or addition_text
+
+
+def is_retryable_llm_error(exc: Exception) -> bool:
+    text = str(exc).lower()
+    return "connection reset" in text or "errno 54" in text or "temporarily unavailable" in text
 
 
 def prompt_for_new_record(parent: Any, project: RedcapProjectToken, language: str) -> dict[str, Any] | None:

@@ -10,7 +10,7 @@ from unittest.mock import patch
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from data_entry_store import DataEntryStore, RedcapDataValue
-from gui.data_entry_page import ClinicalDataEntryPage, data_entry_store_path
+from gui.data_entry_page import ClinicalDataEntryPage, apply_ai_fill_overrides, data_entry_store_path
 from settings_store import AppSettings, RedcapProjectToken
 
 
@@ -242,6 +242,26 @@ class GuiDataEntryPageTests(unittest.TestCase):
 
             self.assertFalse(page.sync_button.isEnabled())
             self.assertEqual(page.record_list.count(), 0)
+
+    def test_ai_fill_overrides_merge_temporary_form_and_field_rules(self) -> None:
+        config = SimpleNamespace(
+            form_overrides={"hasta_bilgileri": {"prompt_append": "Mevcut form kuralı"}},
+            field_overrides={"hasta_ad": {"max_candidates": 2}},
+        )
+
+        apply_ai_fill_overrides(
+            config,
+            form_name="hasta_bilgileri",
+            form_prompt_append="Sadece resmi rapordaki değeri kullan.",
+            field_prompt_appends={"hasta_ad": "İlk iki harfi al."},
+        )
+
+        self.assertEqual(
+            config.form_overrides["hasta_bilgileri"]["prompt_append"],
+            "Mevcut form kuralı\nSadece resmi rapordaki değeri kullan.",
+        )
+        self.assertEqual(config.field_overrides["hasta_ad"]["max_candidates"], 2)
+        self.assertEqual(config.field_overrides["hasta_ad"]["prompt_append"], "İlk iki harfi al.")
 
 
 def build_runtime(app_home: Path, config_path: Path):

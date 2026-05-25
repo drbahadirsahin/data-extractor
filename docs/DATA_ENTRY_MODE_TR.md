@@ -236,12 +236,68 @@ değişiklik olan kayıtları ezmeden conflict listesine alır.
 - REDCap checkbox verisinin `field___code` şeklindeki lokal satırlarını tek
   checkbox alanı olarak toparlar.
 - `required`, `branching_logic`, `text_validation`, min/max gibi metadata
-  bilgilerini UI modeline taşır. Branching logic henüz evaluate edilmiyor;
-  şimdilik görünür metadata olarak saklanıyor.
+  bilgilerini UI modeline taşır. Basit REDCap branching logic ifadeleri
+  (`and`, `or`, karşılaştırmalar ve checkbox kodları) form ekranında
+  değerlendirilmeye başladı; desteklenmeyen karmaşık ifadeler güvenli tarafta
+  kalmak için alanı görünür bırakır.
 
 `gui/data_entry_form.py` bu modeli gerçek PySide widget'larına dönüştüren ilk
 iskeleti sağlar. Değer toplama `collect_values()` ile REDCap flat payload'a yakın
 şekilde yapılır; checkbox alanları `field___code` anahtarları olarak döner.
+
+Form ekranındaki mevcut UI kararları:
+
+- Formlar üstte sıkışan tablar yerine solda okunabilir bir form listesi ve sağda
+  aktif form yüzeyi olarak gösterilir.
+- Alan satırları `dolu`, `boş`, `zorunlu eksik` ve `bilgi` durumlarını görsel
+  olarak ayırır. Bu durumlar değer değiştikçe yeniden hesaplanır.
+- Zorunlu eksik alanlar sıcak uyarı rengiyle, dolu alanlar ise onay rengiyle
+  ayrılır; durum yalnızca renge bağlı kalmasın diye kısa metin etiketi de
+  gösterilir.
+- Her formun içinde kendi kaydırma alanı vardır; form dışındaki gereksiz ikinci
+  kaydırma katmanı kaldırılmıştır.
+
+## Form Bazlı Yapay Zekâ ile Doldurma
+
+Veri giriş ekranındaki `Yapay zekâ ile doldur` işlevi doğrudan LLM çağrısı
+başlatmamalıdır. Doğru akış:
+
+1. Kullanıcı aktif formdayken belgeleri seçer.
+2. Ara ekranda sadece o formun doldurulabilir alanları listelenir.
+3. Boş alanlar varsayılan seçili, dolu alanlar varsayılan korunur.
+4. Kullanıcı alanları tek tek seçip kaldırabilir.
+5. Form geneli için ek yönerge yazılabilir.
+6. Seçili alan için alan özelinde ek yönerge yazılabilir.
+7. LLM çağrısı yalnızca seçili alanlar ve geçici form/alan kuralları ile yapılır.
+
+Bu kurallar proje dosyasına kalıcı yazılmaz; ilgili tarama çalışması için
+geçici scoped config içine eklenir. Ağ tarafında `connection reset` benzeri
+geçici kopmalarda tek kontrollü tekrar denemesi yapılır.
+
+## Repeating Event/Form Durumu
+
+Lokal veri modeli REDCap'in tekrar eden yapılarına hazırlanmış durumda:
+
+- `redcap_data_values` anahtarı `project_id, event_id, record, field_name,
+  instance` kolonlarını içerir.
+- `pending_changes` aynı şekilde `event_id` ve `instance` saklar.
+- Gönderim payload'ı `instance` varsa `redcap_repeat_instance` yazabilir ve
+  proje konfigürasyonundaki `repeating_forms` bilgisiyle
+  `redcap_repeat_instrument` üretebilir.
+
+Ancak form renderer tarafı henüz tam repeating UI değildir. Aynı alan birden
+fazla event veya instance altında geldiğinde mevcut ekran tek bir tercih edilen
+değeri gösterir. Bu yüzden repeating yapı için sonraki zorunlu adım şudur:
+
+- Form listesinde `form + event + instance` bağlamını ayrı ayrı göstermek.
+- Widget anahtarlarını sadece `field_name` yerine `field_name + event_id +
+  instance` olarak yönetmek.
+- Kullanıcının aynı formun farklı instance'larını ekleyebilmesi, kopyalayabilmesi
+  ve silebilmesi.
+- Gönderimde her bağlamı ayrı REDCap import satırına dönüştürmek.
+
+Bu yapılmadan repeating form/event düzenleme davranışı tamamlanmış kabul
+edilmemelidir.
 
 `data_entry_form_changes.py` formdan gelen değerleri mevcut form modeliyle
 karşılaştırır. Sadece değişen editlenebilir alanlar `pending_changes` kuyruğuna

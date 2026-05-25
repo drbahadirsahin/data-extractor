@@ -344,6 +344,27 @@ QFrame#DataEntryFormShell {
     background: transparent;
 }
 
+QFrame#DataEntryFormSelectorBar {
+    background: #ffffff;
+    border: 1px solid #e0ded7;
+    border-radius: 8px;
+}
+
+QLabel#DataEntrySelectorLabel {
+    color: #607080;
+    font-size: 12px;
+    font-weight: 750;
+}
+
+QComboBox#DataEntryFormSelector {
+    background: #fbfaf7;
+    border: 1px solid #d8d5cc;
+    border-radius: 7px;
+    padding: 8px 10px;
+    min-height: 24px;
+    font-weight: 650;
+}
+
 QListWidget#DataEntryFormNav {
     background: #ffffff;
     border: 1px solid #e0ded7;

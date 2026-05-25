@@ -280,6 +280,36 @@ class DataEntrySyncClientTests(unittest.TestCase):
         self.assertEqual(response.values[0].project_id, "17")
         self.assertEqual(response.values[0].record, "123")
 
+    def test_parse_record_data_prefers_wide_data_when_records_is_id_list(self) -> None:
+        response = parse_record_data_response(
+            {
+                "ok": True,
+                "project_id": "17",
+                "records": ["96-6"],
+                "data": [
+                    {
+                        "record_id": "96-6",
+                        "redcap_event_name": "tbbi_bilgiler__tan_arm_1",
+                        "redcap_repeat_instrument": "",
+                        "redcap_repeat_instance": "",
+                        "redcap_data_access_group": "marmara_niversitesb",
+                        "hasta_ad": "AH",
+                        "hasta_soyad": "AŞCI",
+                        "hasta_dogum_tarihi": "1956-03-20",
+                    }
+                ],
+            }
+        )
+
+        by_field = {item.field_name: item for item in response.values}
+        self.assertEqual(response.project_id, "17")
+        self.assertEqual(by_field["hasta_ad"].record, "96-6")
+        self.assertEqual(by_field["hasta_ad"].event_id, "tbbi_bilgiler__tan_arm_1")
+        self.assertEqual(by_field["hasta_ad"].dag_unique_name, "marmara_niversitesb")
+        self.assertEqual(by_field["hasta_ad"].value, "AH")
+        self.assertEqual(by_field["hasta_soyad"].value, "AŞCI")
+        self.assertNotIn("redcap_data_access_group", by_field)
+
     def test_parse_identity_hash_map_accepts_identity_hash_key(self) -> None:
         response = parse_identity_hash_map_response(
             {

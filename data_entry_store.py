@@ -560,6 +560,17 @@ class DataEntryStore:
                 if row is None:
                     to_pull.append(item.record)
                     continue
+                value_count = db.execute(
+                    """
+                    SELECT COUNT(*) AS value_count
+                    FROM redcap_data_values
+                    WHERE project_id = ? AND record = ?
+                    """,
+                    (str(item.project_id), str(item.record)),
+                ).fetchone()
+                if int(value_count["value_count"] or 0) == 0 and not int(row["dirty"] or 0):
+                    to_pull.append(item.record)
+                    continue
                 local_remote_updated_at = row["remote_updated_at"]
                 server_newer = timestamp_is_newer(item.remote_updated_at, local_remote_updated_at)
                 if server_newer and int(row["dirty"] or 0):

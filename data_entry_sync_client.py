@@ -63,6 +63,7 @@ WIDE_RECORD_META_KEYS = {
     "redcap_repeat_instrument",
     "redcap_repeat_instance",
     "instance",
+    "redcap_data_access_group",
     "dag_unique_name",
     "data_access_group_unique_name",
     "dag",
@@ -324,10 +325,12 @@ def parse_record_data_response(payload: Any) -> RecordDataResponse:
 
 
 def first_record_payload(root: dict[str, Any]) -> list[Any]:
-    for key in ["records", "rows", "values", "record_data", "redcap_data", "data"]:
+    for key in ["rows", "values", "record_data", "redcap_data", "data", "records"]:
         value = root.get(key)
         if isinstance(value, list):
-            return value
+            if not value or any(isinstance(item, dict) for item in value):
+                return value
+            continue
         if isinstance(value, dict):
             if looks_like_response_container(value):
                 return [value] if looks_like_record_context(value) else first_record_payload(value)
@@ -461,8 +464,14 @@ def parse_record_rows(
                 field_name=field_name,
                 value=optional_text(row.get("value")) or "",
                 instance=first_text(row, ["instance", "redcap_repeat_instance"]),
-                dag_unique_name=first_text(row, ["dag_unique_name", "data_access_group_unique_name", "dag"])
-                or first_text(record_context, ["dag_unique_name", "data_access_group_unique_name", "dag"]),
+                dag_unique_name=first_text(
+                    row,
+                    ["dag_unique_name", "data_access_group_unique_name", "redcap_data_access_group", "dag"],
+                )
+                or first_text(
+                    record_context,
+                    ["dag_unique_name", "data_access_group_unique_name", "redcap_data_access_group", "dag"],
+                ),
                 remote_updated_at=remote_updated_at,
             )
         )
@@ -476,7 +485,10 @@ def parse_wide_record_row(row: dict[str, Any], *, root: dict[str, Any]) -> list[
     project_id = first_text(row, ["project_id"]) or first_text(root, ["project_id"]) or ""
     event_id = first_text(row, ["event_id", "redcap_event_name", "event"])
     instance = first_text(row, ["instance", "redcap_repeat_instance"])
-    dag_unique_name = first_text(row, ["dag_unique_name", "data_access_group_unique_name", "dag"])
+    dag_unique_name = first_text(
+        row,
+        ["dag_unique_name", "data_access_group_unique_name", "redcap_data_access_group", "dag"],
+    )
     remote_updated_at = first_text(
         row,
         ["sync_updated_at", "record_last_modified_at", "remote_updated_at", "last_modified_at"],

@@ -270,7 +270,7 @@ class DataEntrySyncServiceTests(unittest.TestCase):
             self.assertEqual(report.values_updated, 1)
             self.assertEqual(store.redcap_data_rows("17", "1")[0]["value"], "GH")
 
-    def test_pulled_manifest_is_recorded_even_when_record_data_is_empty(self) -> None:
+    def test_empty_cached_record_is_pulled_again(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             store = DataEntryStore(Path(temp_dir) / "data_entry.sqlite3")
             manifest = SyncManifestResponse(
@@ -297,8 +297,8 @@ class DataEntrySyncServiceTests(unittest.TestCase):
             second_client = FakeSyncClient(manifest=manifest)
             second_report = DataEntrySyncService(store, second_client).sync_read_only()
 
-            self.assertEqual(second_report.unchanged_records, ["empty"])
-            self.assertEqual(second_client.record_data_calls, [])
+            self.assertEqual(second_report.pulled_records, ["empty"])
+            self.assertEqual(second_client.record_data_calls[0]["records"], ["empty"])
 
     def test_sync_passes_since_to_all_remote_calls(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

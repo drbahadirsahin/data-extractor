@@ -29,18 +29,20 @@ class DataEntryFormWidget:
         self.editor_widgets: dict[str, Any] = {}
         self.field_rows: dict[str, Any] = {}
         self.form_nav: Any | None = None
+        self.form_selector: Any | None = None
         self.form_stack: Any | None = None
         self.model: FormRenderModel | None = None
         if model is not None:
             self.set_model(model)
 
     def set_model(self, model: FormRenderModel) -> None:
-        from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QListWidget, QStackedWidget
+        from PySide6.QtWidgets import QComboBox, QFrame, QHBoxLayout, QLabel, QStackedWidget, QVBoxLayout
 
         clear_layout(self.layout)
         self.editor_widgets = {}
         self.field_rows = {}
         self.form_nav = None
+        self.form_selector = None
         self.form_stack = None
         self.model = model
 
@@ -51,39 +53,63 @@ class DataEntryFormWidget:
         if len(model.sections) > 1:
             shell = QFrame()
             shell.setObjectName("DataEntryFormShell")
-            shell_layout = QHBoxLayout(shell)
+            shell_layout = QVBoxLayout(shell)
             shell_layout.setContentsMargins(0, 0, 0, 0)
-            shell_layout.setSpacing(14)
+            shell_layout.setSpacing(10)
 
-            form_nav = QListWidget()
-            form_nav.setObjectName("DataEntryFormNav")
-            form_nav.setMinimumWidth(230)
-            form_nav.setMaximumWidth(330)
+            selector_bar = QFrame()
+            selector_bar.setObjectName("DataEntryFormSelectorBar")
+            selector_layout = QHBoxLayout(selector_bar)
+            selector_layout.setContentsMargins(12, 10, 12, 10)
+            selector_layout.setSpacing(10)
+            selector_label = QLabel("Form")
+            selector_label.setObjectName("DataEntrySelectorLabel")
+            form_selector = QComboBox()
+            form_selector.setObjectName("DataEntryFormSelector")
+            form_selector.setMinimumWidth(360)
+            form_selector.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
             form_stack = QStackedWidget()
             form_stack.setObjectName("DataEntryFormStack")
             for section in model.sections:
-                form_nav.addItem(section.title)
-                form_stack.addWidget(self.build_section_widget(section, show_title=True))
-            form_nav.currentRowChanged.connect(form_stack.setCurrentIndex)
-            form_nav.setCurrentRow(0)
-            self.form_nav = form_nav
+                form_selector.addItem(section.title)
+                form_stack.addWidget(self.build_section_page(section, show_title=True))
+            form_selector.currentIndexChanged.connect(form_stack.setCurrentIndex)
+            form_selector.setCurrentIndex(0)
+            self.form_selector = form_selector
             self.form_stack = form_stack
-            shell_layout.addWidget(form_nav, 0)
-            shell_layout.addWidget(form_stack, 1)
-            self.layout.addWidget(shell, 1)
+            selector_layout.addWidget(selector_label, 0)
+            selector_layout.addWidget(form_selector, 1)
+            shell_layout.addWidget(selector_bar, 0)
+            shell_layout.addWidget(form_stack, 0)
+            self.layout.addWidget(shell, 0)
         else:
             for section in model.sections:
                 self.layout.addWidget(self.build_section_widget(section), 0)
         self.update_branching_visibility()
 
+    def build_section_page(self, section: Any, *, show_title: bool = True) -> Any:
+        from PySide6.QtCore import Qt
+        from PySide6.QtWidgets import QVBoxLayout, QWidget
+
+        page = QWidget()
+        page.setObjectName("DataEntryFormPage")
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        layout.addWidget(self.build_section_widget(section, show_title=show_title), 0, Qt.AlignmentFlag.AlignTop)
+        layout.addStretch(1)
+        return page
+
     def build_section_widget(self, section: Any, *, show_title: bool = True) -> Any:
-        from PySide6.QtWidgets import QFrame, QGridLayout, QLabel, QVBoxLayout
+        from PySide6.QtWidgets import QFrame, QGridLayout, QLabel, QLayout, QSizePolicy, QVBoxLayout
 
         frame = QFrame()
         frame.setObjectName("DataEntryFormSection")
+        frame.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
         layout = QVBoxLayout(frame)
         layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(10)
+        layout.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
         if show_title:
             title = QLabel(section.title)
             title.setObjectName("SectionTitle")
@@ -93,6 +119,7 @@ class DataEntryFormWidget:
         field_grid.setContentsMargins(0, 0, 0, 0)
         field_grid.setHorizontalSpacing(14)
         field_grid.setVerticalSpacing(10)
+        field_grid.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
         row_index = 0
         column_index = 0
         for field in section.fields:
@@ -116,13 +143,15 @@ class DataEntryFormWidget:
         return frame
 
     def build_field_row(self, field: FormFieldModel) -> Any:
-        from PySide6.QtWidgets import QFrame, QLabel, QVBoxLayout
+        from PySide6.QtWidgets import QFrame, QLabel, QLayout, QSizePolicy, QVBoxLayout
 
         row = QFrame()
         row.setObjectName("DataEntryFieldRow")
+        row.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
         layout = QVBoxLayout(row)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(5)
+        layout.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
 
         label_text = field.label
         if field.required:
@@ -160,12 +189,13 @@ class DataEntryFormWidget:
         return self.build_line_edit(field)
 
     def build_line_edit(self, field: FormFieldModel) -> Any:
-        from PySide6.QtWidgets import QLineEdit
+        from PySide6.QtWidgets import QLineEdit, QSizePolicy
 
         editor = QLineEdit(field.value_text)
         editor.setObjectName("DataEntryLineEdit")
         editor.setProperty("field_name", field.field_name)
         editor.setReadOnly(field.read_only)
+        editor.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         configure_line_edit_validation(editor, field)
         editor.textChanged.connect(lambda _text=None: self.update_branching_visibility())
         self.editor_widgets[field.field_name] = editor
@@ -184,11 +214,12 @@ class DataEntryFormWidget:
         return editor
 
     def build_combo(self, field: FormFieldModel) -> Any:
-        from PySide6.QtWidgets import QComboBox
+        from PySide6.QtWidgets import QComboBox, QSizePolicy
 
         editor = QComboBox()
         editor.setObjectName("DataEntryCombo")
         editor.setProperty("field_name", field.field_name)
+        editor.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         editor.addItem("", "")
         for choice in field.choices:
             editor.addItem(choice.label, choice.code)
@@ -289,9 +320,9 @@ class DataEntryFormWidget:
     def current_section(self) -> Any | None:
         if self.model is None or not self.model.sections:
             return None
-        if self.form_nav is None:
+        if self.form_selector is None:
             return self.model.sections[0]
-        index = self.form_nav.currentRow()
+        index = self.form_selector.currentIndex()
         if index < 0 or index >= len(self.model.sections):
             return None
         return self.model.sections[index]

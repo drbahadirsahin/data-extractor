@@ -142,7 +142,7 @@ class GuiDataEntryFormTests(unittest.TestCase):
         self.assertNotIn("first", values)
         self.assertEqual(values["second"], "B")
 
-    def test_multiple_forms_are_rendered_with_tabs_and_opens_first_filled_form(self) -> None:
+    def test_multiple_forms_are_rendered_with_readable_side_nav_and_opens_first_filled_form(self) -> None:
         get_qapplication()
         form = DataEntryFormWidget(
             FormRenderModel(
@@ -163,15 +163,18 @@ class GuiDataEntryFormTests(unittest.TestCase):
                 ],
             )
         )
-        from PySide6.QtWidgets import QTabWidget
+        from PySide6.QtWidgets import QListWidget, QStackedWidget
 
-        form_tabs = form.widget.findChild(QTabWidget, "DataEntryFormTabs")
+        form_nav = form.widget.findChild(QListWidget, "DataEntryFormNav")
+        form_stack = form.widget.findChild(QStackedWidget, "DataEntryFormStack")
 
-        self.assertIsNotNone(form_tabs)
-        self.assertEqual(form_tabs.count(), 2)
-        self.assertEqual(form_tabs.tabText(0), "Form A")
-        self.assertEqual(form_tabs.tabText(1), "Form B (1/1)")
-        self.assertEqual(form_tabs.currentIndex(), 1)
+        self.assertIsNotNone(form_nav)
+        self.assertIsNotNone(form_stack)
+        self.assertEqual(form_nav.count(), 2)
+        self.assertEqual(form_stack.count(), 2)
+        self.assertEqual(form_nav.item(0).text(), "Form A")
+        self.assertEqual(form_nav.item(1).text(), "Form B\n1/1 alan dolu")
+        self.assertEqual(form_nav.currentRow(), 1)
         self.assertEqual(form.current_section().form_name, "b")
 
     def test_simple_branching_logic_hides_and_shows_fields(self) -> None:

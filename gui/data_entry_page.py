@@ -99,7 +99,6 @@ class ClinicalDataEntryPage:
             QListWidget,
             QProgressBar,
             QPushButton,
-            QScrollArea,
             QSplitter,
             QVBoxLayout,
             QWidget,
@@ -199,10 +198,7 @@ class ClinicalDataEntryPage:
         right_layout.setContentsMargins(0, 0, 0, 0)
         right_layout.setSpacing(10)
         self.form_widget = DataEntryFormWidget()
-        self.form_scroll = QScrollArea()
-        self.form_scroll.setWidgetResizable(True)
-        self.form_scroll.setWidget(self.form_widget.widget)
-        right_layout.addWidget(self.form_scroll, 1)
+        right_layout.addWidget(self.form_widget.widget, 1)
         action_row = QHBoxLayout()
         action_row.setSpacing(10)
         self.ai_fill_button = QPushButton(tr("data_entry_ai_fill_form", self.language))

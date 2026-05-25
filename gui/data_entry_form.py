@@ -29,20 +29,19 @@ class DataEntryFormWidget:
         self.editor_widgets: dict[str, Any] = {}
         self.field_rows: dict[str, Any] = {}
         self.form_nav: Any | None = None
-        self.form_tabs: Any | None = None
         self.form_stack: Any | None = None
         self.model: FormRenderModel | None = None
         if model is not None:
             self.set_model(model)
 
     def set_model(self, model: FormRenderModel) -> None:
-        from PySide6.QtWidgets import QFrame, QLabel, QTabWidget
+        from PySide6.QtCore import QSize, Qt
+        from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QListWidget, QListWidgetItem, QStackedWidget
 
         clear_layout(self.layout)
         self.editor_widgets = {}
         self.field_rows = {}
         self.form_nav = None
-        self.form_tabs = None
         self.form_stack = None
         self.model = model
 
@@ -51,36 +50,59 @@ class DataEntryFormWidget:
         header.setWordWrap(True)
         self.layout.addWidget(header)
         if len(model.sections) > 1:
-            form_tabs = QTabWidget()
-            form_tabs.setObjectName("DataEntryFormTabs")
-            form_tabs.setUsesScrollButtons(True)
-            form_tabs.setDocumentMode(True)
-            form_tabs.setMovable(False)
+            shell = QFrame()
+            shell.setObjectName("DataEntryFormShell")
+            shell_layout = QHBoxLayout(shell)
+            shell_layout.setContentsMargins(0, 0, 0, 0)
+            shell_layout.setSpacing(14)
+
+            form_nav = QListWidget()
+            form_nav.setObjectName("DataEntryFormNav")
+            form_nav.setMinimumWidth(280)
+            form_nav.setMaximumWidth(360)
+            form_nav.setWordWrap(True)
+            form_nav.setUniformItemSizes(False)
+            form_nav.setTextElideMode(Qt.TextElideMode.ElideNone)
+
+            form_stack = QStackedWidget()
+            form_stack.setObjectName("DataEntryFormStack")
             for section in model.sections:
-                form_tabs.addTab(
-                    self.build_section_page(section, show_title=True),
-                    tab_title_for_section(section),
-                )
-            form_tabs.setCurrentIndex(first_section_with_values(model.sections))
-            self.form_tabs = form_tabs
-            self.layout.addWidget(form_tabs, 0)
+                item = QListWidgetItem(nav_title_for_section(section))
+                item.setToolTip(str(section.title))
+                item.setSizeHint(QSize(260, 56 if section_filled_count(section) else 46))
+                form_nav.addItem(item)
+                form_stack.addWidget(self.build_section_scroll(section, show_title=True))
+            form_nav.currentRowChanged.connect(form_stack.setCurrentIndex)
+            first_index = first_section_with_values(model.sections)
+            form_nav.setCurrentRow(first_index)
+            self.form_nav = form_nav
+            self.form_stack = form_stack
+            shell_layout.addWidget(form_nav, 0)
+            shell_layout.addWidget(form_stack, 1)
+            self.layout.addWidget(shell, 1)
         else:
             for section in model.sections:
-                self.layout.addWidget(self.build_section_widget(section), 0)
+                self.layout.addWidget(self.build_section_scroll(section), 1)
         self.update_branching_visibility()
 
-    def build_section_page(self, section: Any, *, show_title: bool = True) -> Any:
+    def build_section_scroll(self, section: Any, *, show_title: bool = True) -> Any:
         from PySide6.QtCore import Qt
-        from PySide6.QtWidgets import QVBoxLayout, QWidget
+        from PySide6.QtWidgets import QFrame, QScrollArea, QVBoxLayout, QWidget
 
-        page = QWidget()
-        page.setObjectName("DataEntryFormPage")
-        layout = QVBoxLayout(page)
+        scroll = QScrollArea()
+        scroll.setObjectName("DataEntrySectionScroll")
+        scroll.setWidgetResizable(True)
+        scroll.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+
+        container = QWidget()
+        container.setObjectName("DataEntrySectionScrollBody")
+        layout = QVBoxLayout(container)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
         layout.addWidget(self.build_section_widget(section, show_title=show_title), 0, Qt.AlignmentFlag.AlignTop)
-        layout.addStretch(1)
-        return page
+        scroll.setWidget(container)
+        return scroll
 
     def build_section_widget(self, section: Any, *, show_title: bool = True) -> Any:
         from PySide6.QtWidgets import QFrame, QGridLayout, QLabel, QLayout, QSizePolicy, QVBoxLayout
@@ -302,9 +324,9 @@ class DataEntryFormWidget:
     def current_section(self) -> Any | None:
         if self.model is None or not self.model.sections:
             return None
-        if self.form_tabs is None:
+        if self.form_nav is None:
             return self.model.sections[0]
-        index = self.form_tabs.currentIndex()
+        index = self.form_nav.currentRow()
         if index < 0 or index >= len(self.model.sections):
             return None
         return self.model.sections[index]
@@ -382,11 +404,11 @@ def field_uses_full_width(field: FormFieldModel) -> bool:
     )
 
 
-def tab_title_for_section(section: Any) -> str:
+def nav_title_for_section(section: Any) -> str:
     filled = section_filled_count(section)
     total = len(getattr(section, "fields", []) or [])
     if filled:
-        return f"{section.title} ({filled}/{total})"
+        return f"{section.title}\n{filled}/{total} alan dolu"
     return str(section.title)
 
 

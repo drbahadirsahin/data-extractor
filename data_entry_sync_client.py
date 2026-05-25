@@ -303,8 +303,8 @@ def parse_record_data_response(payload: Any) -> RecordDataResponse:
         root: dict[str, Any] = {}
         records_payload = data
     elif isinstance(data, dict):
-        root = data
-        records_payload = first_list(root, ["records", "data", "rows"])
+        root = nested_response_root(data)
+        records_payload = [root] if looks_like_record_context(root) else first_record_payload(root)
     else:
         root = {}
         records_payload = []
@@ -318,15 +318,117 @@ def parse_record_data_response(payload: Any) -> RecordDataResponse:
         for record_context in records_payload:
             if not isinstance(record_context, dict):
                 continue
-            rows = first_list(record_context, ["rows", "data", "values"])
-            if not rows and "field_name" in record_context:
-                rows = [record_context]
-            if rows:
-                values.extend(parse_record_rows(rows, root=root, record_context=record_context))
-            else:
-                values.extend(parse_wide_record_row(record_context, root=root))
+            values.extend(parse_record_context(record_context, root=root))
 
     return RecordDataResponse(project_id=project_id, values=values, raw=payload)
+
+
+def first_record_payload(root: dict[str, Any]) -> list[Any]:
+    for key in ["records", "rows", "values", "record_data", "redcap_data", "data"]:
+        value = root.get(key)
+        if isinstance(value, list):
+            return value
+        if isinstance(value, dict):
+            if looks_like_response_container(value):
+                return [value] if looks_like_record_context(value) else first_record_payload(value)
+            return record_mapping_to_contexts(value)
+    return []
+
+
+def nested_response_root(root: dict[str, Any]) -> dict[str, Any]:
+    for key in ["payload", "result", "data"]:
+        nested = root.get(key)
+        if isinstance(nested, dict) and looks_like_response_container(nested):
+            return nested_response_root(nested)
+    return root
+
+
+def record_mapping_to_contexts(value: dict[str, Any]) -> list[dict[str, Any]]:
+    contexts: list[dict[str, Any]] = []
+    for record_key, record_payload in value.items():
+        if isinstance(record_payload, list):
+            contexts.append({"record": str(record_key), "rows": record_payload})
+        elif isinstance(record_payload, dict):
+            merged = dict(record_payload)
+            merged.setdefault("record", str(record_key))
+            contexts.append(merged)
+        else:
+            contexts.append({"record": str(record_key), "value": record_payload})
+    return contexts
+
+
+def looks_like_record_context(value: dict[str, Any]) -> bool:
+    if first_text(value, ["record", "record_id"]):
+        return True
+    return bool("field_name" in value or "field" in value)
+
+
+def looks_like_response_container(value: dict[str, Any]) -> bool:
+    if any(key in value for key in ["records", "rows", "values", "record_data", "redcap_data"]):
+        return True
+    return "project_id" in value and not looks_like_record_context(value)
+
+
+def parse_record_context(record_context: dict[str, Any], *, root: dict[str, Any]) -> list[RedcapDataValue]:
+    if "field_name" in record_context or "field" in record_context:
+        return parse_record_rows([record_context], root=root, record_context={})
+    parsed: list[RedcapDataValue] = []
+    for key in ["rows", "values", "fields", "redcap_data", "data"]:
+        nested = record_context.get(key)
+        if isinstance(nested, list):
+            parsed.extend(parse_nested_record_list(nested, root=root, record_context=record_context))
+        elif isinstance(nested, dict):
+            parsed.extend(parse_nested_record_dict(nested, root=root, record_context=record_context))
+    if parsed:
+        return parsed
+    return parse_wide_record_row(record_context, root=root)
+
+
+def parse_nested_record_list(
+    rows: list[Any],
+    *,
+    root: dict[str, Any],
+    record_context: dict[str, Any],
+) -> list[RedcapDataValue]:
+    dict_rows = [row for row in rows if isinstance(row, dict)]
+    if not dict_rows:
+        return []
+    if all("field_name" in row or "field" in row for row in dict_rows):
+        return parse_record_rows(dict_rows, root=root, record_context=record_context)
+    parsed: list[RedcapDataValue] = []
+    for row in dict_rows:
+        merged = dict(row)
+        for key in WIDE_RECORD_META_KEYS:
+            if key in record_context and key not in merged:
+                merged[key] = record_context[key]
+        parsed.extend(parse_wide_record_row(merged, root=root))
+    return parsed
+
+
+def parse_nested_record_dict(
+    values: dict[str, Any],
+    *,
+    root: dict[str, Any],
+    record_context: dict[str, Any],
+) -> list[RedcapDataValue]:
+    if "field_name" in values or "field" in values:
+        return parse_record_rows([values], root=root, record_context=record_context)
+    parsed: list[RedcapDataValue] = []
+    nested_context = dict(record_context)
+    for key in WIDE_RECORD_META_KEYS:
+        if key in values:
+            nested_context[key] = values[key]
+    for key in ["rows", "values", "fields", "redcap_data", "data"]:
+        nested = values.get(key)
+        if isinstance(nested, list):
+            parsed.extend(parse_nested_record_list(nested, root=root, record_context=nested_context))
+        elif isinstance(nested, dict) and nested is not values:
+            parsed.extend(parse_nested_record_dict(nested, root=root, record_context=nested_context))
+    if parsed:
+        return parsed
+    wide_row = dict(record_context)
+    wide_row.update(values)
+    return parse_wide_record_row(wide_row, root=root)
 
 
 def parse_record_rows(

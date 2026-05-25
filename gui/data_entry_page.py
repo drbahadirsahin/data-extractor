@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 import logging
 from pathlib import Path
 from typing import Any, Callable
@@ -15,8 +16,10 @@ from data_entry_sync_service import DataEntrySyncService
 from gui.data_entry_form import DataEntryFormWidget
 from gui.i18n import tr
 from identity_registry_client import IdentityRegistryClient, load_identity_registry_config
+from redcap_client import RedcapClient
 from settings_store import RedcapProjectToken
 from submission_service import normalize_tc_identity_no
+from workspace_extraction import extract_patient_documents
 from workspace_flow import WorkspaceBundle, load_workspace_bundle
 
 
@@ -42,6 +45,47 @@ class DataEntrySyncWorker(QObject):
             self.failed.emit(str(exc))
             return
         self.finished.emit(report)
+
+
+class DataEntryAIFillWorker(QObject):
+    finished = Signal(object)
+    failed = Signal(str)
+
+    def __init__(
+        self,
+        *,
+        config: Any,
+        form_name: str,
+        documents: list[str],
+    ) -> None:
+        super().__init__()
+        self.config = config
+        self.form_name = form_name
+        self.documents = documents
+
+    @Slot()
+    def run(self) -> None:
+        try:
+            scoped_config = deepcopy(self.config)
+            scoped_config.target_forms = [self.form_name]
+            scoped_config.target_fields = []
+            result = extract_patient_documents(
+                config=scoped_config,
+                queue_label="data_entry_ai_fill",
+                patient_mode="existing",
+                identifier_type=None,
+                identifier_value=None,
+                documents=self.documents,
+            )
+            values: dict[str, Any] = {}
+            for field_result in result.merged_response.results:
+                if field_result.final_value is None or field_result.status == "not_found":
+                    continue
+                values[field_result.field_name] = field_result.final_value
+        except Exception as exc:
+            self.failed.emit(str(exc))
+            return
+        self.finished.emit(values)
 
 
 class ClinicalDataEntryPage:
@@ -70,6 +114,8 @@ class ClinicalDataEntryPage:
         self.current_model = None
         self._sync_thread: QThread | None = None
         self._sync_worker: DataEntrySyncWorker | None = None
+        self._ai_thread: QThread | None = None
+        self._ai_worker: DataEntryAIFillWorker | None = None
 
         self.widget = QWidget()
         layout = QVBoxLayout(self.widget)
@@ -157,16 +203,36 @@ class ClinicalDataEntryPage:
         self.form_scroll.setWidgetResizable(True)
         self.form_scroll.setWidget(self.form_widget.widget)
         right_layout.addWidget(self.form_scroll, 1)
+        action_row = QHBoxLayout()
+        action_row.setSpacing(10)
+        self.ai_fill_button = QPushButton(tr("data_entry_ai_fill_form", self.language))
+        self.ai_fill_button.setProperty("secondary", True)
+        self.ai_fill_button.clicked.connect(self.fill_current_form_with_ai)
+        self.ai_fill_button.setEnabled(False)
         self.save_button = QPushButton(tr("data_entry_save_local", self.language))
-        self.save_button.clicked.connect(self.save_current_record)
+        self.save_button.setProperty("secondary", True)
+        self.save_button.clicked.connect(lambda: self.save_current_record(send=False))
         self.save_button.setEnabled(False)
-        right_layout.addWidget(self.save_button, 0, Qt.AlignmentFlag.AlignRight)
+        self.send_button = QPushButton(tr("data_entry_save_and_send", self.language))
+        self.send_button.clicked.connect(lambda: self.save_current_record(send=True))
+        self.send_button.setEnabled(False)
+        action_row.addWidget(self.ai_fill_button)
+        action_row.addStretch(1)
+        action_row.addWidget(self.save_button)
+        action_row.addWidget(self.send_button)
+        right_layout.addLayout(action_row)
         splitter.addWidget(right_panel)
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
         layout.addWidget(splitter, 1)
 
         self.refresh_project_state()
+
+    def set_form_actions_enabled(self, enabled: bool) -> None:
+        enabled = bool(enabled)
+        self.ai_fill_button.setEnabled(enabled and self._ai_thread is None)
+        self.save_button.setEnabled(enabled)
+        self.send_button.setEnabled(enabled)
 
     def on_dag_changed(self) -> None:
         option = self.dag_combo.currentData()
@@ -185,7 +251,7 @@ class ClinicalDataEntryPage:
             self.sync_button.setEnabled(False)
             self.refresh_button.setEnabled(False)
             self.new_record_button.setEnabled(False)
-            self.save_button.setEnabled(False)
+            self.set_form_actions_enabled(False)
             self.record_list.clear()
             self.status_label.setText(tr("data_entry_connect_first", self.language))
         else:
@@ -225,7 +291,7 @@ class ClinicalDataEntryPage:
         project = current_redcap_project_token(self.runtime.settings)
         self.record_list.clear()
         self.current_model = None
-        self.save_button.setEnabled(False)
+        self.set_form_actions_enabled(False)
         if project is None:
             return
         try:
@@ -282,7 +348,7 @@ class ClinicalDataEntryPage:
             return
         self.current_model = model
         self.form_widget.set_model(model)
-        self.save_button.setEnabled(True)
+        self.set_form_actions_enabled(True)
         self.status_label.setText(tr("data_entry_record_opened", self.language, record=record))
 
     def open_new_record(self, tc_identity_no: str | None = None, dag_option: dict[str, Any] | None = None) -> None:
@@ -342,7 +408,7 @@ class ClinicalDataEntryPage:
         )
         self.form_widget.set_model(self.current_model)
         self.record_list.clearSelection()
-        self.save_button.setEnabled(True)
+        self.set_form_actions_enabled(True)
         self.status_label.setText(
             tr(
                 "data_entry_new_record_ready",
@@ -352,7 +418,7 @@ class ClinicalDataEntryPage:
             )
         )
 
-    def save_current_record(self) -> None:
+    def save_current_record(self, *, send: bool = False) -> None:
         if self.current_model is None:
             return
         try:
@@ -360,13 +426,139 @@ class ClinicalDataEntryPage:
         except Exception as exc:
             self.status_label.setText(tr("data_entry_save_failed", self.language, error=str(exc)))
             return
-        if result.queued_count == 0:
+        queued_count = result.queued_count
+        if send:
+            try:
+                submitted_count = self.submit_current_record_changes()
+            except Exception as exc:
+                self.status_label.setText(tr("data_entry_send_failed", self.language, error=str(exc)))
+                return
+            if queued_count == 0 and submitted_count == 0:
+                self.status_label.setText(tr("data_entry_no_local_changes", self.language))
+                return
+            current_record = self.current_model.record
+            self.refresh_records()
+            select_record_in_list(self.record_list, current_record)
+            self.status_label.setText(
+                tr(
+                    "data_entry_send_done",
+                    self.language,
+                    queued=queued_count,
+                    submitted=submitted_count,
+                )
+            )
+            return
+        if queued_count == 0:
             self.status_label.setText(tr("data_entry_no_local_changes", self.language))
             return
         current_record = self.current_model.record
         self.refresh_records()
         select_record_in_list(self.record_list, current_record)
-        self.status_label.setText(tr("data_entry_changes_queued", self.language, count=result.queued_count))
+        self.status_label.setText(tr("data_entry_changes_queued", self.language, count=queued_count))
+
+    def submit_current_record_changes(self) -> int:
+        if self.current_model is None:
+            return 0
+        project = current_redcap_project_token(self.runtime.settings)
+        if project is None:
+            raise RuntimeError(tr("data_entry_connect_first", self.language))
+        token = self.runtime.secrets_store.get(project.token_secret_name)
+        if not token:
+            raise RuntimeError(tr("data_entry_missing_token", self.language))
+        pending = [
+            item
+            for item in self.store.pending_changes(project.project_id)
+            if str(item.get("record")) == str(self.current_model.record)
+        ]
+        if not pending:
+            return 0
+        rows, change_ids = build_redcap_import_rows_from_pending(
+            pending,
+            model=self.current_model,
+            bundle=self.bundle,
+            app_config=self.runtime.app_config,
+        )
+        if not rows:
+            return 0
+        client = RedcapClient(project.api_url, token, timeout_seconds=600)
+        client.import_records(rows, overwrite_behavior="normal", return_content="ids")
+        for change_id in change_ids:
+            self.store.mark_change_status(change_id, "submitted")
+        remaining = [
+            item
+            for item in self.store.pending_changes(project.project_id)
+            if str(item.get("record")) == str(self.current_model.record)
+        ]
+        if not remaining:
+            self.store.mark_record_clean(project.project_id, self.current_model.record)
+        return len(change_ids)
+
+    def fill_current_form_with_ai(self) -> None:
+        from PySide6.QtWidgets import QFileDialog
+
+        if self.current_model is None:
+            return
+        if self.bundle is None:
+            self.status_label.setText(tr("data_entry_metadata_missing", self.language))
+            return
+        section = self.form_widget.current_section()
+        if section is None:
+            self.status_label.setText(tr("data_entry_ai_fill_no_form", self.language))
+            return
+        if self._ai_thread is not None:
+            return
+        documents, _selected_filter = QFileDialog.getOpenFileNames(
+            self.widget,
+            tr("data_entry_ai_fill_select_documents", self.language),
+            "",
+            "Documents (*.pdf *.txt *.docx *.doc *.rtf *.png *.jpg *.jpeg *.tif *.tiff);;All files (*)",
+        )
+        if not documents:
+            return
+        field_names = {field.field_name for field in section.fields}
+        thread = QThread(self.widget)
+        worker = DataEntryAIFillWorker(
+            config=self.bundle.config,
+            form_name=section.form_name,
+            documents=[str(path) for path in documents],
+        )
+        worker.moveToThread(thread)
+        self._ai_thread = thread
+        self._ai_worker = worker
+        self.ai_fill_button.setEnabled(False)
+        self.sync_progress.setVisible(True)
+        self.status_label.setText(tr("data_entry_ai_fill_running", self.language, form=section.title))
+        worker.finished.connect(
+            lambda values, names=field_names: self.handle_ai_fill_success(values, names),
+            Qt.ConnectionType.QueuedConnection,
+        )
+        worker.failed.connect(self.handle_ai_fill_failure, Qt.ConnectionType.QueuedConnection)
+        worker.finished.connect(thread.quit)
+        worker.failed.connect(thread.quit)
+        thread.started.connect(worker.run)
+        thread.finished.connect(worker.deleteLater)
+        thread.finished.connect(thread.deleteLater)
+        thread.finished.connect(self.cleanup_ai_thread, Qt.ConnectionType.QueuedConnection)
+        thread.start()
+
+    @Slot(object, object)
+    def handle_ai_fill_success(self, values: dict[str, Any], field_names: set[str]) -> None:
+        if not values:
+            self.status_label.setText(tr("data_entry_ai_fill_no_values", self.language))
+            return
+        applied = self.form_widget.apply_values(values, field_names=field_names)
+        self.status_label.setText(tr("data_entry_ai_fill_done", self.language, count=applied))
+
+    @Slot(str)
+    def handle_ai_fill_failure(self, error: str) -> None:
+        self.status_label.setText(tr("data_entry_ai_fill_failed", self.language, error=error))
+
+    @Slot()
+    def cleanup_ai_thread(self) -> None:
+        self._ai_thread = None
+        self._ai_worker = None
+        self.sync_progress.setVisible(False)
+        self.set_form_actions_enabled(self.current_model is not None)
 
     def start_sync(self, *, auto: bool = False) -> bool:
         project = current_redcap_project_token(self.runtime.settings)
@@ -499,6 +691,66 @@ def select_record_in_list(record_list: Any, record: str) -> None:
         if str(item.data(Qt.ItemDataRole.UserRole)) == str(record):
             record_list.setCurrentRow(index)
             return
+
+
+def build_redcap_import_rows_from_pending(
+    pending: list[dict[str, Any]],
+    *,
+    model: Any,
+    bundle: WorkspaceBundle | None,
+    app_config: dict[str, Any],
+) -> tuple[list[dict[str, Any]], list[int]]:
+    record_id_field = data_entry_record_id_field(app_config)
+    fields_by_name = {field.field_name: field for field in getattr(model, "fields", [])}
+    grouped_rows: dict[tuple[str, str, str], dict[str, Any]] = {}
+    change_ids: list[int] = []
+    for change in pending:
+        field_name = str(change.get("field_name") or "")
+        if not field_name:
+            continue
+        field = fields_by_name.get(field_name) or fields_by_name.get(field_name.split("___", 1)[0])
+        event_name = redcap_event_name_for_change(change, field, bundle)
+        instance = str(change.get("instance") or "")
+        repeat_instrument = redcap_repeat_instrument_for_change(change, field, bundle)
+        row_key = (event_name, repeat_instrument, instance)
+        row = grouped_rows.setdefault(row_key, {record_id_field: str(change.get("record") or model.record)})
+        if event_name:
+            row["redcap_event_name"] = event_name
+        if repeat_instrument:
+            row["redcap_repeat_instrument"] = repeat_instrument
+        if instance:
+            row["redcap_repeat_instance"] = instance
+        row[field_name] = str(change.get("new_value") or "")
+        if change.get("id") is not None:
+            change_ids.append(int(change["id"]))
+    reserved = {record_id_field, "redcap_event_name", "redcap_repeat_instrument", "redcap_repeat_instance"}
+    rows = [row for row in grouped_rows.values() if any(key not in reserved for key in row)]
+    return rows, change_ids
+
+
+def data_entry_record_id_field(app_config: dict[str, Any]) -> str:
+    payload = app_config.get("data_entry") if isinstance(app_config, dict) else None
+    configured = payload.get("record_id_field") if isinstance(payload, dict) else None
+    return str(configured or "record_id")
+
+
+def redcap_event_name_for_change(change: dict[str, Any], field: Any, bundle: WorkspaceBundle | None) -> str:
+    event_id = str(change.get("event_id") or "")
+    if event_id and not event_id.isdigit():
+        return event_id
+    if bundle is None or field is None:
+        return ""
+    events = bundle.config.form_event_map.get(field.form_name) or []
+    return str(events[0]).strip() if events else ""
+
+
+def redcap_repeat_instrument_for_change(change: dict[str, Any], field: Any, bundle: WorkspaceBundle | None) -> str:
+    if not str(change.get("instance") or ""):
+        return ""
+    if bundle is None or field is None:
+        return ""
+    repeating_forms = set(bundle.config.repeating_forms or [])
+    return field.form_name if field.form_name in repeating_forms else ""
 
 
 def prompt_for_new_record(parent: Any, project: RedcapProjectToken, language: str) -> dict[str, Any] | None:

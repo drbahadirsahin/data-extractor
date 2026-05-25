@@ -217,6 +217,69 @@ class DataEntrySyncClientTests(unittest.TestCase):
         self.assertEqual(by_field["hasta_ad"].dag_unique_name, "marmara")
         self.assertEqual(by_field["risk___1"].value, "1")
 
+    def test_parse_record_data_supports_nested_field_dict(self) -> None:
+        response = parse_record_data_response(
+            {
+                "project_id": "17",
+                "records": [
+                    {
+                        "record": "123",
+                        "data_access_group_unique_name": "marmara",
+                        "data": {
+                            "hasta_ad": "AHMET",
+                            "hasta_soyad": "YILMAZ",
+                        },
+                    }
+                ],
+            }
+        )
+
+        by_field = {item.field_name: item for item in response.values}
+        self.assertEqual(by_field["hasta_ad"].project_id, "17")
+        self.assertEqual(by_field["hasta_ad"].record, "123")
+        self.assertEqual(by_field["hasta_ad"].value, "AHMET")
+        self.assertEqual(by_field["hasta_ad"].dag_unique_name, "marmara")
+        self.assertEqual(by_field["hasta_soyad"].value, "YILMAZ")
+
+    def test_parse_record_data_supports_record_mapping(self) -> None:
+        response = parse_record_data_response(
+            {
+                "project_id": "17",
+                "records": {
+                    "123": {
+                        "hasta_ad": "AHMET",
+                        "hasta_soyad": "YILMAZ",
+                    }
+                },
+            }
+        )
+
+        by_field = {item.field_name: item for item in response.values}
+        self.assertEqual(by_field["hasta_ad"].project_id, "17")
+        self.assertEqual(by_field["hasta_ad"].record, "123")
+        self.assertEqual(by_field["hasta_ad"].value, "AHMET")
+
+    def test_parse_record_data_supports_ok_data_envelope(self) -> None:
+        response = parse_record_data_response(
+            {
+                "ok": True,
+                "data": {
+                    "project_id": "17",
+                    "records": [
+                        {
+                            "record": "123",
+                            "rows": [{"field_name": "hasta_ad", "value": "AHMET"}],
+                        }
+                    ],
+                },
+            }
+        )
+
+        self.assertEqual(response.project_id, "17")
+        self.assertEqual(len(response.values), 1)
+        self.assertEqual(response.values[0].project_id, "17")
+        self.assertEqual(response.values[0].record, "123")
+
     def test_parse_identity_hash_map_accepts_identity_hash_key(self) -> None:
         response = parse_identity_hash_map_response(
             {

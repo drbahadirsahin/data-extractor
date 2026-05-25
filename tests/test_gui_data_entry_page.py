@@ -37,6 +37,26 @@ class FakeIdentityRegistryClient:
         return SimpleNamespace(record_id="9001", created=True, raw={})
 
 
+class FakeRedcapClient:
+    calls = []
+
+    def __init__(self, api_url, api_token, timeout_seconds=60):
+        self.api_url = api_url
+        self.api_token = api_token
+        self.timeout_seconds = timeout_seconds
+
+    def import_records(self, records, *, overwrite_behavior="normal", return_content="ids", force_auto_number=False):
+        self.calls.append(
+            {
+                "records": records,
+                "overwrite_behavior": overwrite_behavior,
+                "return_content": return_content,
+                "force_auto_number": force_auto_number,
+            }
+        )
+        return [str(record.get("record_id", "")) for record in records]
+
+
 class GuiDataEntryPageTests(unittest.TestCase):
     def test_page_lists_local_records_and_queues_form_changes(self) -> None:
         get_qapplication()
@@ -81,6 +101,37 @@ class GuiDataEntryPageTests(unittest.TestCase):
             self.assertEqual(len(pending), 1)
             self.assertEqual(pending[0]["field_name"], "hasta_ad")
             self.assertEqual(pending[0]["new_value"], "EF")
+
+    def test_save_and_send_imports_pending_changes(self) -> None:
+        get_qapplication()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app_home = Path(temp_dir)
+            config_path = write_project_config(app_home)
+            store = DataEntryStore(data_entry_store_path(app_home))
+            store.initialize()
+            store.upsert_remote_values(
+                [
+                    RedcapDataValue(
+                        project_id="17",
+                        event_id="",
+                        record="1",
+                        field_name="hasta_ad",
+                        value="AB",
+                    )
+                ]
+            )
+            runtime = build_runtime(app_home, config_path)
+            page = ClinicalDataEntryPage(runtime)
+            page.record_list.setCurrentRow(0)
+            page.form_widget.editor_widgets["hasta_ad"].setText("EF")
+            FakeRedcapClient.calls = []
+
+            with patch("gui.data_entry_page.RedcapClient", FakeRedcapClient):
+                page.save_current_record(send=True)
+
+            self.assertEqual(len(FakeRedcapClient.calls), 1)
+            self.assertEqual(FakeRedcapClient.calls[0]["records"], [{"record_id": "1", "hasta_ad": "EF"}])
+            self.assertEqual(store.pending_changes("17"), [])
 
     def test_page_shows_project_context_and_dag_switcher(self) -> None:
         get_qapplication()

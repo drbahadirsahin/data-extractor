@@ -521,6 +521,28 @@ class DataEntryStore:
                 (str(status), int(change_id)),
             )
 
+    def mark_record_clean(self, project_id: str, record: str) -> None:
+        cleaned_at = utc_now()
+        with self.connect() as db:
+            db.execute(
+                """
+                UPDATE redcap_data_values
+                SET dirty = 0,
+                    source = 'remote',
+                    local_updated_at = ?
+                WHERE project_id = ? AND record = ?
+                """,
+                (cleaned_at, str(project_id), str(record)),
+            )
+            self._upsert_record_sync_state(
+                db,
+                project_id=str(project_id),
+                record=str(record),
+                local_updated_at=cleaned_at,
+                last_synced_at=cleaned_at,
+                dirty=False,
+            )
+
     def compare_remote_manifest(self, manifest: Iterable[RemoteRecordManifest]) -> SyncDelta:
         to_pull: list[str] = []
         conflicts: list[str] = []

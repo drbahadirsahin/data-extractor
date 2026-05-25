@@ -28,6 +28,8 @@ class DataEntryFormWidget:
         self.layout.setSpacing(14)
         self.editor_widgets: dict[str, Any] = {}
         self.field_rows: dict[str, Any] = {}
+        self.form_nav: Any | None = None
+        self.form_stack: Any | None = None
         self.model: FormRenderModel | None = None
         if model is not None:
             self.set_model(model)
@@ -38,6 +40,8 @@ class DataEntryFormWidget:
         clear_layout(self.layout)
         self.editor_widgets = {}
         self.field_rows = {}
+        self.form_nav = None
+        self.form_stack = None
         self.model = model
 
         header = QLabel(model.title)
@@ -62,17 +66,18 @@ class DataEntryFormWidget:
                 form_stack.addWidget(self.build_section_widget(section, show_title=True))
             form_nav.currentRowChanged.connect(form_stack.setCurrentIndex)
             form_nav.setCurrentRow(0)
+            self.form_nav = form_nav
+            self.form_stack = form_stack
             shell_layout.addWidget(form_nav, 0)
             shell_layout.addWidget(form_stack, 1)
             self.layout.addWidget(shell, 1)
         else:
             for section in model.sections:
                 self.layout.addWidget(self.build_section_widget(section), 0)
-        self.layout.addStretch(1)
         self.update_branching_visibility()
 
     def build_section_widget(self, section: Any, *, show_title: bool = True) -> Any:
-        from PySide6.QtWidgets import QFrame, QLabel, QVBoxLayout
+        from PySide6.QtWidgets import QFrame, QGridLayout, QLabel, QVBoxLayout
 
         frame = QFrame()
         frame.setObjectName("DataEntryFormSection")
@@ -84,9 +89,30 @@ class DataEntryFormWidget:
             title.setObjectName("SectionTitle")
             title.setWordWrap(True)
             layout.addWidget(title)
+        field_grid = QGridLayout()
+        field_grid.setContentsMargins(0, 0, 0, 0)
+        field_grid.setHorizontalSpacing(14)
+        field_grid.setVerticalSpacing(10)
+        row_index = 0
+        column_index = 0
         for field in section.fields:
-            layout.addWidget(self.build_field_row(field), 0)
-        layout.addStretch(1)
+            row_widget = self.build_field_row(field)
+            if field_uses_full_width(field):
+                if column_index != 0:
+                    row_index += 1
+                    column_index = 0
+                field_grid.addWidget(row_widget, row_index, 0, 1, 2)
+                row_index += 1
+                column_index = 0
+                continue
+            field_grid.addWidget(row_widget, row_index, column_index)
+            column_index += 1
+            if column_index >= 2:
+                row_index += 1
+                column_index = 0
+        field_grid.setColumnStretch(0, 1)
+        field_grid.setColumnStretch(1, 1)
+        layout.addLayout(field_grid)
         return frame
 
     def build_field_row(self, field: FormFieldModel) -> Any:
@@ -260,6 +286,59 @@ class DataEntryFormWidget:
             return None
         return build_form_change_set(self.model, self.collect_values())
 
+    def current_section(self) -> Any | None:
+        if self.model is None or not self.model.sections:
+            return None
+        if self.form_nav is None:
+            return self.model.sections[0]
+        index = self.form_nav.currentRow()
+        if index < 0 or index >= len(self.model.sections):
+            return None
+        return self.model.sections[index]
+
+    def apply_values(self, values: dict[str, Any], *, field_names: set[str] | None = None) -> int:
+        applied = 0
+        for field in (self.model.fields if self.model is not None else []):
+            if field_names is not None and field.field_name not in field_names:
+                continue
+            if field.field_name not in values:
+                continue
+            if self.apply_field_value(field, values[field.field_name]):
+                applied += 1
+        self.update_branching_visibility()
+        return applied
+
+    def apply_field_value(self, field: FormFieldModel, value: Any) -> bool:
+        widget = self.editor_widgets.get(field.field_name)
+        if widget is None or field.read_only or field.editor == DESCRIPTION_EDITOR:
+            return False
+        if field.editor == TEXT_AREA_EDITOR:
+            widget.setPlainText(str(value or ""))
+            return True
+        if field.editor == TEXT_EDITOR:
+            widget.setText(str(value or ""))
+            return True
+        if field.editor in {DROPDOWN_EDITOR, DYNAMIC_DROPDOWN_EDITOR}:
+            index = widget.findData(str(value or ""))
+            if index < 0:
+                index = widget.findText(str(value or ""))
+            if index >= 0:
+                widget.setCurrentIndex(index)
+                return True
+            return False
+        if field.editor == RADIO_EDITOR:
+            for button in widget.buttons():
+                if str(button.property("choice_code")) == str(value):
+                    button.setChecked(True)
+                    return True
+            return False
+        if field.editor == CHECKBOX_EDITOR:
+            selected = {str(item) for item in value} if isinstance(value, list) else {str(value)}
+            for checkbox in widget:
+                checkbox.setChecked(str(checkbox.property("choice_code")) in selected)
+            return True
+        return False
+
     def update_branching_visibility(self) -> None:
         if self.model is None:
             return
@@ -280,6 +359,14 @@ def clear_layout(layout: Any) -> None:
             widget.deleteLater()
         elif child_layout is not None:
             clear_layout(child_layout)
+
+
+def field_uses_full_width(field: FormFieldModel) -> bool:
+    return bool(
+        field.editor in {TEXT_AREA_EDITOR, RADIO_EDITOR, CHECKBOX_EDITOR, DESCRIPTION_EDITOR}
+        or field.branching_logic
+        or len(str(field.label or "")) > 64
+    )
 
 
 def configure_line_edit_validation(editor: Any, field: FormFieldModel) -> None:

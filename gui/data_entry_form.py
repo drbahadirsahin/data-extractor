@@ -29,20 +29,20 @@ class DataEntryFormWidget:
         self.editor_widgets: dict[str, Any] = {}
         self.field_rows: dict[str, Any] = {}
         self.form_nav: Any | None = None
-        self.form_selector: Any | None = None
+        self.form_tabs: Any | None = None
         self.form_stack: Any | None = None
         self.model: FormRenderModel | None = None
         if model is not None:
             self.set_model(model)
 
     def set_model(self, model: FormRenderModel) -> None:
-        from PySide6.QtWidgets import QComboBox, QFrame, QHBoxLayout, QLabel, QStackedWidget, QVBoxLayout
+        from PySide6.QtWidgets import QFrame, QLabel, QTabWidget
 
         clear_layout(self.layout)
         self.editor_widgets = {}
         self.field_rows = {}
         self.form_nav = None
-        self.form_selector = None
+        self.form_tabs = None
         self.form_stack = None
         self.model = model
 
@@ -51,37 +51,19 @@ class DataEntryFormWidget:
         header.setWordWrap(True)
         self.layout.addWidget(header)
         if len(model.sections) > 1:
-            shell = QFrame()
-            shell.setObjectName("DataEntryFormShell")
-            shell_layout = QVBoxLayout(shell)
-            shell_layout.setContentsMargins(0, 0, 0, 0)
-            shell_layout.setSpacing(10)
-
-            selector_bar = QFrame()
-            selector_bar.setObjectName("DataEntryFormSelectorBar")
-            selector_layout = QHBoxLayout(selector_bar)
-            selector_layout.setContentsMargins(12, 10, 12, 10)
-            selector_layout.setSpacing(10)
-            selector_label = QLabel("Form")
-            selector_label.setObjectName("DataEntrySelectorLabel")
-            form_selector = QComboBox()
-            form_selector.setObjectName("DataEntryFormSelector")
-            form_selector.setMinimumWidth(360)
-            form_selector.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
-            form_stack = QStackedWidget()
-            form_stack.setObjectName("DataEntryFormStack")
+            form_tabs = QTabWidget()
+            form_tabs.setObjectName("DataEntryFormTabs")
+            form_tabs.setUsesScrollButtons(True)
+            form_tabs.setDocumentMode(True)
+            form_tabs.setMovable(False)
             for section in model.sections:
-                form_selector.addItem(section.title)
-                form_stack.addWidget(self.build_section_page(section, show_title=True))
-            form_selector.currentIndexChanged.connect(form_stack.setCurrentIndex)
-            form_selector.setCurrentIndex(0)
-            self.form_selector = form_selector
-            self.form_stack = form_stack
-            selector_layout.addWidget(selector_label, 0)
-            selector_layout.addWidget(form_selector, 1)
-            shell_layout.addWidget(selector_bar, 0)
-            shell_layout.addWidget(form_stack, 0)
-            self.layout.addWidget(shell, 0)
+                form_tabs.addTab(
+                    self.build_section_page(section, show_title=True),
+                    tab_title_for_section(section),
+                )
+            form_tabs.setCurrentIndex(first_section_with_values(model.sections))
+            self.form_tabs = form_tabs
+            self.layout.addWidget(form_tabs, 0)
         else:
             for section in model.sections:
                 self.layout.addWidget(self.build_section_widget(section), 0)
@@ -320,9 +302,9 @@ class DataEntryFormWidget:
     def current_section(self) -> Any | None:
         if self.model is None or not self.model.sections:
             return None
-        if self.form_selector is None:
+        if self.form_tabs is None:
             return self.model.sections[0]
-        index = self.form_selector.currentIndex()
+        index = self.form_tabs.currentIndex()
         if index < 0 or index >= len(self.model.sections):
             return None
         return self.model.sections[index]
@@ -398,6 +380,35 @@ def field_uses_full_width(field: FormFieldModel) -> bool:
         or field.branching_logic
         or len(str(field.label or "")) > 64
     )
+
+
+def tab_title_for_section(section: Any) -> str:
+    filled = section_filled_count(section)
+    total = len(getattr(section, "fields", []) or [])
+    if filled:
+        return f"{section.title} ({filled}/{total})"
+    return str(section.title)
+
+
+def first_section_with_values(sections: list[Any]) -> int:
+    for index, section in enumerate(sections):
+        if section_filled_count(section) > 0:
+            return index
+    return 0
+
+
+def section_filled_count(section: Any) -> int:
+    count = 0
+    for field in getattr(section, "fields", []) or []:
+        if field.editor == DESCRIPTION_EDITOR:
+            continue
+        if isinstance(field.value, list):
+            if field.value:
+                count += 1
+            continue
+        if str(field.value or "") != "":
+            count += 1
+    return count
 
 
 def configure_line_edit_validation(editor: Any, field: FormFieldModel) -> None:

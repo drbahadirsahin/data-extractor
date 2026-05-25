@@ -71,6 +71,37 @@ class DataEntryFormModelTests(unittest.TestCase):
         self.assertFalse(model.fields[0].present)
         self.assertEqual(model.fields[0].value, "")
 
+    def test_prefers_non_empty_value_when_same_field_exists_in_multiple_events(self) -> None:
+        detail = RecordDetail(
+            project_id="17",
+            record="96-6",
+            forms=[
+                RecordFormSection(
+                    form_name="hasta_bilgileri",
+                    fields=[
+                        RecordFieldValue(
+                            field_name="hasta_ad",
+                            value="",
+                            event_id="baseline_arm_1",
+                            present=True,
+                        ),
+                        RecordFieldValue(
+                            field_name="hasta_ad",
+                            value="AH",
+                            event_id="tbbi_bilgiler__tan_arm_1",
+                            present=True,
+                        ),
+                    ],
+                )
+            ],
+        )
+        fields = {"hasta_bilgileri": [FieldSpec("hasta_ad", "hasta_bilgileri", "text", "Hasta adı")]}
+
+        model = build_form_render_model(detail, fields)
+
+        self.assertEqual(model.fields[0].value, "AH")
+        self.assertEqual(model.fields[0].event_id, "tbbi_bilgiler__tan_arm_1")
+
     def test_maps_readonly_and_descriptive_fields(self) -> None:
         detail = RecordDetail(
             project_id="17",

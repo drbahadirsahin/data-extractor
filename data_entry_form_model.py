@@ -168,8 +168,22 @@ def direct_value_map(values: Iterable[RecordFieldValue]) -> dict[str, RecordFiel
     for value in values:
         if "___" in value.field_name:
             continue
-        mapped.setdefault(value.field_name, value)
+        existing = mapped.get(value.field_name)
+        if existing is None or record_value_is_better(value, existing):
+            mapped[value.field_name] = value
     return mapped
+
+
+def record_value_is_better(candidate: RecordFieldValue, current: RecordFieldValue) -> bool:
+    if candidate.dirty and not current.dirty:
+        return True
+    candidate_has_value = str(candidate.value or "") != ""
+    current_has_value = str(current.value or "") != ""
+    if candidate_has_value and not current_has_value:
+        return True
+    if candidate.present and not current.present:
+        return True
+    return False
 
 
 def checkbox_value_map(values: Iterable[RecordFieldValue]) -> dict[str, set[str]]:

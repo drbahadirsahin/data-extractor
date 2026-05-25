@@ -344,25 +344,32 @@ QFrame#DataEntryFormShell {
     background: transparent;
 }
 
-QFrame#DataEntryFormSelectorBar {
-    background: #ffffff;
-    border: 1px solid #e0ded7;
-    border-radius: 8px;
+QTabWidget#DataEntryFormTabs::pane {
+    background: transparent;
+    border: none;
+    top: -1px;
 }
 
-QLabel#DataEntrySelectorLabel {
-    color: #607080;
-    font-size: 12px;
-    font-weight: 750;
-}
-
-QComboBox#DataEntryFormSelector {
+QTabWidget#DataEntryFormTabs QTabBar::tab {
     background: #fbfaf7;
-    border: 1px solid #d8d5cc;
-    border-radius: 7px;
-    padding: 8px 10px;
-    min-height: 24px;
+    color: #334155;
+    border: 1px solid #e0ded7;
+    border-bottom: 1px solid #d8d5cc;
+    border-top-left-radius: 7px;
+    border-top-right-radius: 7px;
+    padding: 9px 14px;
+    margin-right: 4px;
     font-weight: 650;
+}
+
+QTabWidget#DataEntryFormTabs QTabBar::tab:selected {
+    background: #ffffff;
+    color: #0f766e;
+    border-color: #b7ded5;
+}
+
+QTabWidget#DataEntryFormTabs QTabBar::tab:hover {
+    background: #edf8f4;
 }
 
 QListWidget#DataEntryFormNav {

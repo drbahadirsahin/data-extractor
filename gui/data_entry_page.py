@@ -58,16 +58,16 @@ class DataEntryAIFillWorker(QObject):
         config: Any,
         form_name: str,
         field_names: list[str],
-        form_prompt_append: str = "",
-        field_prompt_appends: dict[str, str] | None = None,
+        form_override: dict[str, Any] | None = None,
+        field_overrides: dict[str, dict[str, Any]] | None = None,
         documents: list[str],
     ) -> None:
         super().__init__()
         self.config = config
         self.form_name = form_name
         self.field_names = field_names
-        self.form_prompt_append = form_prompt_append
-        self.field_prompt_appends = field_prompt_appends or {}
+        self.form_override = form_override or {}
+        self.field_overrides = field_overrides or {}
         self.documents = documents
 
     @Slot()
@@ -79,8 +79,8 @@ class DataEntryAIFillWorker(QObject):
             apply_ai_fill_overrides(
                 scoped_config,
                 form_name=self.form_name,
-                form_prompt_append=self.form_prompt_append,
-                field_prompt_appends=self.field_prompt_appends,
+                form_override=self.form_override,
+                field_overrides=self.field_overrides,
             )
             result = self.extract_with_retry(scoped_config)
             values: dict[str, Any] = {}
@@ -544,6 +544,11 @@ class ClinicalDataEntryPage:
             section=section,
             documents=[str(path) for path in documents],
             language=self.language,
+            base_form_override=dict(self.bundle.config.form_overrides.get(section.form_name, {}) or {}),
+            base_field_overrides={
+                field.field_name: dict(self.bundle.config.field_overrides.get(field.field_name, {}) or {})
+                for field in section.fields
+            },
         )
         if fill_options is None:
             return
@@ -553,8 +558,8 @@ class ClinicalDataEntryPage:
             config=self.bundle.config,
             form_name=section.form_name,
             field_names=list(fill_options["field_names"]),
-            form_prompt_append=str(fill_options.get("form_prompt_append") or ""),
-            field_prompt_appends=dict(fill_options.get("field_prompt_appends") or {}),
+            form_override=dict(fill_options.get("form_override") or {}),
+            field_overrides=dict(fill_options.get("field_overrides") or {}),
             documents=list(fill_options["documents"]),
         )
         worker.moveToThread(thread)
@@ -794,7 +799,10 @@ def prompt_ai_fill_options(
     section: Any,
     documents: list[str],
     language: str,
+    base_form_override: dict[str, Any] | None = None,
+    base_field_overrides: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any] | None:
+    from gui.override_editor import edit_override_payload, override_summary
     from PySide6.QtWidgets import (
         QDialog,
         QDialogButtonBox,
@@ -803,7 +811,6 @@ def prompt_ai_fill_options(
         QLabel,
         QListWidget,
         QListWidgetItem,
-        QPlainTextEdit,
         QPushButton,
         QSplitter,
         QVBoxLayout,
@@ -890,11 +897,13 @@ def prompt_ai_fill_options(
     form_rule_label = QLabel(tr("data_entry_ai_fill_form_rule", language))
     form_rule_label.setObjectName("SectionLabel")
     right_layout.addWidget(form_rule_label)
-    form_rule_input = QPlainTextEdit()
-    form_rule_input.setObjectName("DataEntryRuleInput")
-    form_rule_input.setPlaceholderText(tr("data_entry_ai_fill_form_rule_placeholder", language))
-    form_rule_input.setMinimumHeight(84)
-    right_layout.addWidget(form_rule_input)
+    form_rule_summary = QLabel("")
+    form_rule_summary.setObjectName("MutedLabel")
+    form_rule_summary.setWordWrap(True)
+    right_layout.addWidget(form_rule_summary)
+    edit_form_rule_button = QPushButton(tr("data_entry_ai_fill_edit_form_rule", language))
+    edit_form_rule_button.setProperty("secondary", True)
+    right_layout.addWidget(edit_form_rule_button)
 
     field_rule_label = QLabel(tr("data_entry_ai_fill_field_rule", language))
     field_rule_label.setObjectName("SectionLabel")
@@ -903,11 +912,15 @@ def prompt_ai_fill_options(
     selected_field_label.setObjectName("MutedLabel")
     selected_field_label.setWordWrap(True)
     right_layout.addWidget(selected_field_label)
-    field_rule_input = QPlainTextEdit()
-    field_rule_input.setObjectName("DataEntryRuleInput")
-    field_rule_input.setPlaceholderText(tr("data_entry_ai_fill_field_rule_placeholder", language))
-    field_rule_input.setMinimumHeight(120)
-    right_layout.addWidget(field_rule_input, 1)
+    field_rule_summary = QLabel("")
+    field_rule_summary.setObjectName("MutedLabel")
+    field_rule_summary.setWordWrap(True)
+    right_layout.addWidget(field_rule_summary)
+    edit_field_rule_button = QPushButton(tr("data_entry_ai_fill_edit_field_rule", language))
+    edit_field_rule_button.setProperty("secondary", True)
+    edit_field_rule_button.setEnabled(False)
+    right_layout.addWidget(edit_field_rule_button)
+    right_layout.addStretch(1)
 
     content_splitter.addWidget(left_panel)
     content_splitter.addWidget(right_panel)
@@ -921,29 +934,70 @@ def prompt_ai_fill_options(
     warning.setVisible(False)
     layout.addWidget(warning)
 
-    field_rules: dict[str, str] = {}
+    base_form_override = dict(base_form_override or {})
+    base_field_overrides = {
+        str(field_name): dict(payload or {})
+        for field_name, payload in (base_field_overrides or {}).items()
+    }
+    form_rule_payload: dict[str, Any] | None = None
+    field_rule_payloads: dict[str, dict[str, Any]] = {}
     current_rule_field: str | None = None
 
-    def save_current_field_rule() -> None:
-        nonlocal current_rule_field
-        if current_rule_field:
-            field_rules[current_rule_field] = field_rule_input.toPlainText().strip()
+    def current_form_payload() -> dict[str, Any]:
+        return form_rule_payload if form_rule_payload is not None else base_form_override
 
     def load_current_field_rule(current: Any, _previous: Any = None) -> None:
         nonlocal current_rule_field
-        save_current_field_rule()
         if current is None:
             current_rule_field = None
             selected_field_label.setText(tr("data_entry_ai_fill_no_field_rule_target", language))
-            field_rule_input.setPlainText("")
-            field_rule_input.setEnabled(False)
+            field_rule_summary.setText(override_summary({}, language=language))
+            edit_field_rule_button.setEnabled(False)
             return
         field_name = str(current.data(Qt.ItemDataRole.UserRole))
         current_rule_field = field_name
         field = field_by_name[field_name]
         selected_field_label.setText(f"{field.label} ({field.field_name})")
-        field_rule_input.setEnabled(True)
-        field_rule_input.setPlainText(field_rules.get(field_name, ""))
+        field_rule_summary.setText(override_summary(current_field_payload(field_name), language=language))
+        edit_field_rule_button.setEnabled(True)
+
+    def current_field_payload(field_name: str) -> dict[str, Any]:
+        if field_name in field_rule_payloads:
+            return field_rule_payloads[field_name]
+        return base_field_overrides.get(field_name, {})
+
+    def update_form_rule_summary() -> None:
+        form_rule_summary.setText(override_summary(current_form_payload(), language=language))
+
+    def edit_form_rule() -> None:
+        nonlocal form_rule_payload
+        payload = edit_override_payload(
+            parent=dialog,
+            title=tr("selected_form_rules", language),
+            subject_label=str(getattr(section, "title", "")),
+            payload=current_form_payload(),
+            language=language,
+        )
+        if payload is None:
+            return
+        form_rule_payload = payload
+        update_form_rule_summary()
+
+    def edit_field_rule() -> None:
+        if not current_rule_field:
+            return
+        field = field_by_name[current_rule_field]
+        payload = edit_override_payload(
+            parent=dialog,
+            title=tr("selected_field_rules", language),
+            subject_label=f"{field.label} | {field.field_name}",
+            payload=current_field_payload(current_rule_field),
+            language=language,
+        )
+        if payload is None:
+            return
+        field_rule_payloads[current_rule_field] = payload
+        field_rule_summary.setText(override_summary(payload, language=language))
 
     def set_checked(mode: str) -> None:
         for index in range(field_list.count()):
@@ -967,7 +1021,6 @@ def prompt_ai_fill_options(
         return names
 
     def accept_if_valid() -> None:
-        save_current_field_rule()
         if not selected_field_names():
             warning.setText(tr("data_entry_ai_fill_no_fields_selected", language))
             warning.setVisible(True)
@@ -975,9 +1028,12 @@ def prompt_ai_fill_options(
         dialog.accept()
 
     field_list.currentItemChanged.connect(load_current_field_rule)
+    edit_form_rule_button.clicked.connect(lambda _checked=False: edit_form_rule())
+    edit_field_rule_button.clicked.connect(lambda _checked=False: edit_field_rule())
     select_empty_button.clicked.connect(lambda _checked=False: set_checked("empty"))
     select_all_button.clicked.connect(lambda _checked=False: set_checked("all"))
     clear_button.clicked.connect(lambda _checked=False: set_checked("clear"))
+    update_form_rule_summary()
     if field_list.count():
         field_list.setCurrentRow(0)
 
@@ -1001,11 +1057,11 @@ def prompt_ai_fill_options(
     return {
         "documents": documents,
         "field_names": chosen_fields,
-        "form_prompt_append": form_rule_input.toPlainText().strip(),
-        "field_prompt_appends": {
-            field_name: prompt
-            for field_name, prompt in field_rules.items()
-            if field_name in chosen_fields and prompt
+        "form_override": form_rule_payload or {},
+        "field_overrides": {
+            field_name: payload
+            for field_name, payload in field_rule_payloads.items()
+            if field_name in chosen_fields and payload
         },
     }
 
@@ -1041,27 +1097,33 @@ def apply_ai_fill_overrides(
     config: Any,
     *,
     form_name: str,
-    form_prompt_append: str,
-    field_prompt_appends: dict[str, str],
+    form_override: dict[str, Any] | None,
+    field_overrides: dict[str, dict[str, Any]] | None,
 ) -> None:
-    if form_prompt_append:
-        form_override = dict((getattr(config, "form_overrides", {}) or {}).get(form_name, {}) or {})
-        form_override["prompt_append"] = merge_prompt_append(form_override.get("prompt_append"), form_prompt_append)
-        config.form_overrides[form_name] = form_override
-    for field_name, prompt_append in field_prompt_appends.items():
-        if not prompt_append:
+    config.form_overrides = dict(getattr(config, "form_overrides", {}) or {})
+    config.field_overrides = dict(getattr(config, "field_overrides", {}) or {})
+    if form_override:
+        config.form_overrides[form_name] = merged_override_payload(
+            config.form_overrides.get(form_name, {}),
+            form_override,
+        )
+    for field_name, payload in (field_overrides or {}).items():
+        if not payload:
             continue
-        field_override = dict((getattr(config, "field_overrides", {}) or {}).get(field_name, {}) or {})
-        field_override["prompt_append"] = merge_prompt_append(field_override.get("prompt_append"), prompt_append)
-        config.field_overrides[field_name] = field_override
+        config.field_overrides[field_name] = merged_override_payload(
+            config.field_overrides.get(field_name, {}),
+            payload,
+        )
 
 
-def merge_prompt_append(existing: Any, addition: str) -> str:
-    existing_text = str(existing or "").strip()
-    addition_text = str(addition or "").strip()
-    if existing_text and addition_text:
-        return f"{existing_text}\n{addition_text}"
-    return existing_text or addition_text
+def merged_override_payload(existing: dict[str, Any] | None, override: dict[str, Any]) -> dict[str, Any]:
+    merged = dict(existing or {})
+    for key, value in (override or {}).items():
+        if value is None or value == "":
+            merged.pop(key, None)
+            continue
+        merged[key] = value
+    return merged
 
 
 def is_retryable_llm_error(exc: Exception) -> bool:

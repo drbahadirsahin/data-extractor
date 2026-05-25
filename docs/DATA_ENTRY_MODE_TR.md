@@ -266,9 +266,11 @@ başlatmamalıdır. Doğru akış:
 2. Ara ekranda sadece o formun doldurulabilir alanları listelenir.
 3. Boş alanlar varsayılan seçili, dolu alanlar varsayılan korunur.
 4. Kullanıcı alanları tek tek seçip kaldırabilir.
-5. Form geneli için ek yönerge yazılabilir.
-6. Seçili alan için alan özelinde ek yönerge yazılabilir.
-7. LLM çağrısı yalnızca seçili alanlar ve geçici form/alan kuralları ile yapılır.
+5. Form geneli için kök programdaki ortak kural editörü açılabilir.
+6. Seçili alan için aynı ortak kural editörü açılabilir.
+7. Ek yönerge, çokluk, seçim kuralı, aday sayısı ve çıktı uzunluğu ayarları
+   aynı override payload formatıyla geçici tarama config'ine uygulanır.
+8. LLM çağrısı yalnızca seçili alanlar ve geçici form/alan kuralları ile yapılır.
 
 Bu kurallar proje dosyasına kalıcı yazılmaz; ilgili tarama çalışması için
 geçici scoped config içine eklenir. Ağ tarafında `connection reset` benzeri

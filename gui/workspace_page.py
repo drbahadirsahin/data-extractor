@@ -1226,120 +1226,15 @@ class WorkspacePage:
         self.save_bundle_and_reload(tr("field_override_saved", self.language, field=field_name), parent=parent)
 
     def edit_override_payload(self, *, title: str, subject_label: str, payload: dict, parent=None) -> dict | None:
-        from PySide6.QtWidgets import (
-            QCheckBox,
-            QComboBox,
-            QDialog,
-            QDialogButtonBox,
-            QFormLayout,
-            QLabel,
-            QPlainTextEdit,
-            QSpinBox,
-            QVBoxLayout,
+        from gui.override_editor import edit_override_payload
+
+        return edit_override_payload(
+            parent=parent or self.widget,
+            title=title,
+            subject_label=subject_label,
+            payload=payload,
+            language=self.language,
         )
-
-        dialog = QDialog(parent or self.widget)
-        dialog.setWindowTitle(title)
-        dialog.setMinimumWidth(560)
-        layout = QVBoxLayout(dialog)
-        layout.setSpacing(12)
-
-        info = QLabel(tr("override_editor_desc", self.language, name=subject_label))
-        info.setWordWrap(True)
-        layout.addWidget(info)
-
-        form = QFormLayout()
-        form.setSpacing(10)
-
-        prompt_append_input = QPlainTextEdit()
-        prompt_append_input.setPlainText(str(payload.get("prompt_append", "") or ""))
-        prompt_append_input.setMinimumHeight(96)
-
-        cardinality_input = QComboBox()
-        cardinality_input.addItem(tr("override_use_default", self.language), "")
-        cardinality_input.addItem("single", "single")
-        cardinality_input.addItem("multiple", "multiple")
-        cardinality_input.addItem("repeat_entity", "repeat_entity")
-        self._set_combo_value(cardinality_input, str(payload.get("cardinality", "") or ""))
-
-        selection_rule_input = QComboBox()
-        selection_rule_input.addItem(tr("override_use_default", self.language), "")
-        for value in ["latest", "earliest", "highest", "lowest", "all", "manual_review"]:
-            selection_rule_input.addItem(value, value)
-        self._set_combo_value(selection_rule_input, str(payload.get("selection_rule", "") or ""))
-
-        max_candidates_enabled = QCheckBox(tr("override_enable_max_candidates", self.language))
-        max_candidates_input = QSpinBox()
-        max_candidates_input.setRange(1, 50)
-        max_candidates_value = payload.get("max_candidates")
-        max_candidates_enabled.setChecked(max_candidates_value is not None)
-        max_candidates_input.setValue(int(max_candidates_value or 3))
-        max_candidates_input.setEnabled(max_candidates_enabled.isChecked())
-
-        post_processing = payload.get("post_processing") or []
-        limit_length_value = self.extract_limit_output_length(post_processing)
-        limit_length_enabled = QCheckBox(tr("override_limit_output_length", self.language))
-        limit_length_enabled.setChecked(limit_length_value is not None)
-        limit_length_input = QSpinBox()
-        limit_length_input.setRange(1, 5000)
-        limit_length_input.setValue(int(limit_length_value or 100))
-        limit_length_input.setEnabled(limit_length_enabled.isChecked())
-
-        form.addRow(tr("override_prompt_append", self.language), prompt_append_input)
-        form.addRow(tr("override_cardinality", self.language), cardinality_input)
-        form.addRow(tr("override_selection_rule", self.language), selection_rule_input)
-        form.addRow("", max_candidates_enabled)
-        form.addRow(tr("override_max_candidates", self.language), max_candidates_input)
-        form.addRow("", limit_length_enabled)
-        form.addRow(tr("override_limit_length_value", self.language), limit_length_input)
-        layout.addLayout(form)
-
-        max_candidates_enabled.toggled.connect(max_candidates_input.setEnabled)
-        limit_length_enabled.toggled.connect(limit_length_input.setEnabled)
-
-        button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
-        button_box.rejected.connect(dialog.reject)
-        ok_button = button_box.button(QDialogButtonBox.StandardButton.Ok)
-        if ok_button is not None:
-            ok_button.setAutoDefault(False)
-            ok_button.setDefault(False)
-        layout.addWidget(button_box)
-
-        result_payload: dict | None = None
-
-        def validate_and_accept() -> None:
-            nonlocal result_payload
-            result: dict[str, Any] = {}
-            prompt_append = prompt_append_input.toPlainText().strip()
-            if prompt_append:
-                result["prompt_append"] = prompt_append
-
-            cardinality = str(cardinality_input.currentData() or "").strip()
-            if cardinality:
-                result["cardinality"] = cardinality
-
-            selection_rule = str(selection_rule_input.currentData() or "").strip()
-            if selection_rule:
-                result["selection_rule"] = selection_rule
-
-            if max_candidates_enabled.isChecked():
-                result["max_candidates"] = int(max_candidates_input.value())
-
-            post_processing_items = self.merge_post_processing(
-                existing=post_processing,
-                limit_output_length=int(limit_length_input.value()) if limit_length_enabled.isChecked() else None,
-            )
-            if post_processing_items:
-                result["post_processing"] = post_processing_items
-
-            result_payload = result
-            dialog.accept()
-
-        button_box.accepted.connect(validate_and_accept)
-
-        if dialog.exec() == 0:
-            return None
-        return result_payload
 
     def manage_extra_fields(self) -> None:
         from PySide6.QtWidgets import (
@@ -2856,30 +2751,6 @@ class WorkspacePage:
         if field is None:
             return None
         return f"{field.field_label} | {field.field_name}"
-
-    def extract_limit_output_length(self, post_processing: list | None) -> int | None:
-        for item in post_processing or []:
-            if isinstance(item, (list, tuple)) and len(item) >= 2 and item[0] == "limit_output_length":
-                try:
-                    return int(item[1])
-                except (TypeError, ValueError):
-                    return None
-        return None
-
-    def merge_post_processing(self, *, existing: list | None, limit_output_length: int | None) -> list:
-        merged: list = []
-        for item in existing or []:
-            if isinstance(item, (list, tuple)) and item and item[0] == "limit_output_length":
-                continue
-            merged.append(item)
-        if limit_output_length is not None:
-            merged.append(["limit_output_length", int(limit_output_length)])
-        return merged
-
-    def _set_combo_value(self, combo, target_value: str) -> None:
-        index = combo.findData(target_value)
-        if index >= 0:
-            combo.setCurrentIndex(index)
 
     def resolve_form_rule_target(self) -> str | None:
         if not self.bundle:

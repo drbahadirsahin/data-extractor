@@ -10,7 +10,12 @@ from unittest.mock import patch
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from data_entry_store import DataEntryStore, RedcapDataValue
-from gui.data_entry_page import ClinicalDataEntryPage, apply_ai_fill_overrides, data_entry_store_path
+from gui.data_entry_page import (
+    ClinicalDataEntryPage,
+    apply_ai_fill_overrides,
+    data_entry_store_path,
+    merged_override_payload,
+)
 from settings_store import AppSettings, RedcapProjectToken
 
 
@@ -252,16 +257,36 @@ class GuiDataEntryPageTests(unittest.TestCase):
         apply_ai_fill_overrides(
             config,
             form_name="hasta_bilgileri",
-            form_prompt_append="Sadece resmi rapordaki değeri kullan.",
-            field_prompt_appends={"hasta_ad": "İlk iki harfi al."},
+            form_override={
+                "prompt_append": "Sadece resmi rapordaki değeri kullan.",
+                "cardinality": "single",
+            },
+            field_overrides={
+                "hasta_ad": {
+                    "prompt_append": "İlk iki harfi al.",
+                    "post_processing": [["limit_output_length", 2]],
+                }
+            },
         )
 
         self.assertEqual(
             config.form_overrides["hasta_bilgileri"]["prompt_append"],
-            "Mevcut form kuralı\nSadece resmi rapordaki değeri kullan.",
+            "Sadece resmi rapordaki değeri kullan.",
         )
+        self.assertEqual(config.form_overrides["hasta_bilgileri"]["cardinality"], "single")
         self.assertEqual(config.field_overrides["hasta_ad"]["max_candidates"], 2)
         self.assertEqual(config.field_overrides["hasta_ad"]["prompt_append"], "İlk iki harfi al.")
+        self.assertEqual(config.field_overrides["hasta_ad"]["post_processing"], [["limit_output_length", 2]])
+
+    def test_merged_override_payload_can_replace_and_clear_values(self) -> None:
+        payload = merged_override_payload(
+            {"prompt_append": "A", "max_candidates": 3, "selection_rule": "latest"},
+            {"prompt_append": "B", "max_candidates": None},
+        )
+
+        self.assertEqual(payload["prompt_append"], "B")
+        self.assertEqual(payload["selection_rule"], "latest")
+        self.assertNotIn("max_candidates", payload)
 
 
 def build_runtime(app_home: Path, config_path: Path):

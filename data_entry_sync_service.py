@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Iterable, Protocol
 
-from data_entry_store import DataEntryStore, RemoteRecordManifest
+from data_entry_store import DataEntryStore, RedcapDataValue, RemoteRecordManifest
 from data_entry_sync_client import (
     IdentityHashMapResponse,
     RecordDataResponse,
@@ -71,15 +71,21 @@ class DataEntrySyncService:
 
         values_updated = 0
         if delta.to_pull:
-            record_data = self.client.get_record_data(
-                records=delta.to_pull,
-                fields=fields,
-                events=events,
-                since=since,
-            )
             self.store.upsert_remote_manifest(pulled_manifest)
-            self.store.upsert_remote_values(record_data.values)
-            values_updated = len(record_data.values)
+            for record_batch in batched(delta.to_pull, 50):
+                record_data = self.client.get_record_data(
+                    records=record_batch,
+                    fields=fields,
+                    events=events,
+                    since=since,
+                )
+                normalized_values = fill_missing_project_ids(
+                    record_data.values,
+                    fallback_project_id=manifest.project_id or record_data.project_id,
+                    manifest_by_record=manifest_by_record,
+                )
+                self.store.upsert_remote_values(normalized_values)
+                values_updated += len(normalized_values)
 
         identity_hash_map = self.client.get_identity_hash_map(since=since)
         self.store.upsert_identity_hashes(identity_hash_map.entries)
@@ -125,3 +131,40 @@ def resolve_project_id(
         if item.project_id:
             return item.project_id
     return None
+
+
+def batched(values: list[str], size: int) -> list[list[str]]:
+    return [values[index : index + size] for index in range(0, len(values), size)]
+
+
+def fill_missing_project_ids(
+    values: list[RedcapDataValue],
+    *,
+    fallback_project_id: str | None,
+    manifest_by_record: dict[str, RemoteRecordManifest],
+) -> list[RedcapDataValue]:
+    normalized: list[RedcapDataValue] = []
+    for value in values:
+        if value.project_id:
+            normalized.append(value)
+            continue
+        record_manifest = manifest_by_record.get(str(value.record))
+        project_id = (
+            str(record_manifest.project_id)
+            if record_manifest is not None and record_manifest.project_id
+            else str(fallback_project_id or "")
+        )
+        normalized.append(
+            RedcapDataValue(
+                project_id=project_id,
+                event_id=value.event_id,
+                record=value.record,
+                field_name=value.field_name,
+                value=value.value,
+                instance=value.instance,
+                dag_unique_name=value.dag_unique_name or (record_manifest.dag_unique_name if record_manifest else None),
+                remote_updated_at=value.remote_updated_at
+                or (record_manifest.remote_updated_at if record_manifest else None),
+            )
+        )
+    return normalized

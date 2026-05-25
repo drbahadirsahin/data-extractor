@@ -340,29 +340,36 @@ QWidget#DataEntryForm {
     background: transparent;
 }
 
-QTabWidget#DataEntryFormTabs::pane {
-    border: 1px solid #e0ded7;
-    border-radius: 8px;
-    background: #ffffff;
-    top: -1px;
+QFrame#DataEntryFormShell {
+    background: transparent;
 }
 
-QTabWidget#DataEntryFormTabs QTabBar::tab {
-    background: #f2f4f5;
-    color: #526170;
-    border: 1px solid #d8d5cc;
-    border-bottom: none;
-    border-top-left-radius: 7px;
-    border-top-right-radius: 7px;
-    padding: 9px 14px;
-    margin-right: 4px;
+QListWidget#DataEntryFormNav {
+    background: #ffffff;
+    border: 1px solid #e0ded7;
+    border-radius: 8px;
+    padding: 8px;
+}
+
+QListWidget#DataEntryFormNav::item {
+    color: #334155;
+    padding: 10px 12px;
+    border-radius: 7px;
     font-weight: 650;
 }
 
-QTabWidget#DataEntryFormTabs QTabBar::tab:selected {
-    background: #ffffff;
+QListWidget#DataEntryFormNav::item:selected {
+    background: #102027;
+    color: #ffffff;
+}
+
+QListWidget#DataEntryFormNav::item:hover {
+    background: #edf8f4;
     color: #0f766e;
-    border-color: #b7ded5;
+}
+
+QStackedWidget#DataEntryFormStack {
+    background: transparent;
 }
 
 QLabel#DataEntryRecordTitle {

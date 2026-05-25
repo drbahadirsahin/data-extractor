@@ -33,7 +33,7 @@ class DataEntryFormWidget:
             self.set_model(model)
 
     def set_model(self, model: FormRenderModel) -> None:
-        from PySide6.QtWidgets import QLabel, QTabWidget
+        from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QListWidget, QStackedWidget
 
         clear_layout(self.layout)
         self.editor_widgets = {}
@@ -45,11 +45,26 @@ class DataEntryFormWidget:
         header.setWordWrap(True)
         self.layout.addWidget(header)
         if len(model.sections) > 1:
-            tabs = QTabWidget()
-            tabs.setObjectName("DataEntryFormTabs")
+            shell = QFrame()
+            shell.setObjectName("DataEntryFormShell")
+            shell_layout = QHBoxLayout(shell)
+            shell_layout.setContentsMargins(0, 0, 0, 0)
+            shell_layout.setSpacing(14)
+
+            form_nav = QListWidget()
+            form_nav.setObjectName("DataEntryFormNav")
+            form_nav.setMinimumWidth(230)
+            form_nav.setMaximumWidth(330)
+            form_stack = QStackedWidget()
+            form_stack.setObjectName("DataEntryFormStack")
             for section in model.sections:
-                tabs.addTab(self.build_section_widget(section, show_title=False), section.title)
-            self.layout.addWidget(tabs, 1)
+                form_nav.addItem(section.title)
+                form_stack.addWidget(self.build_section_widget(section, show_title=True))
+            form_nav.currentRowChanged.connect(form_stack.setCurrentIndex)
+            form_nav.setCurrentRow(0)
+            shell_layout.addWidget(form_nav, 0)
+            shell_layout.addWidget(form_stack, 1)
+            self.layout.addWidget(shell, 1)
         else:
             for section in model.sections:
                 self.layout.addWidget(self.build_section_widget(section), 0)

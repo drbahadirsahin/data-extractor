@@ -330,6 +330,75 @@ class DataEntrySyncServiceTests(unittest.TestCase):
             self.assertEqual(client.record_data_calls[0]["fields"], ["hasta_ad"])
             self.assertEqual(client.record_data_calls[0]["events"], ["event_1_arm_1"])
 
+    def test_missing_project_ids_are_filled_from_manifest(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = DataEntryStore(Path(temp_dir) / "data_entry.sqlite3")
+            client = FakeSyncClient(
+                manifest=SyncManifestResponse(
+                    project_id="17",
+                    dag_unique_name="marmara",
+                    identity_hash_updated_at=None,
+                    records=[
+                        RemoteRecordManifest(
+                            project_id="17",
+                            record="1",
+                            remote_updated_at="2026-05-24T10:00:00Z",
+                            dag_unique_name="marmara",
+                        )
+                    ],
+                    raw={},
+                ),
+                record_data=RecordDataResponse(
+                    project_id=None,
+                    values=[
+                        RedcapDataValue(
+                            project_id="",
+                            event_id="",
+                            record="1",
+                            field_name="hasta_ad",
+                            value="AB",
+                        )
+                    ],
+                    raw={},
+                ),
+            )
+
+            report = DataEntrySyncService(store, client).sync_read_only()
+
+            self.assertEqual(report.values_updated, 1)
+            rows = store.redcap_data_rows("17", "1")
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0]["field_name"], "hasta_ad")
+            self.assertEqual(rows[0]["value"], "AB")
+
+    def test_large_initial_sync_fetches_record_data_in_batches(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = DataEntryStore(Path(temp_dir) / "data_entry.sqlite3")
+            manifests = [
+                RemoteRecordManifest(
+                    project_id="17",
+                    record=str(index),
+                    remote_updated_at="2026-05-24T10:00:00Z",
+                )
+                for index in range(125)
+            ]
+            client = FakeSyncClient(
+                manifest=SyncManifestResponse(
+                    project_id="17",
+                    dag_unique_name=None,
+                    identity_hash_updated_at=None,
+                    records=manifests,
+                    raw={},
+                )
+            )
+
+            DataEntrySyncService(store, client).sync_read_only()
+
+            self.assertEqual(len(client.record_data_calls), 3)
+            self.assertEqual(len(client.record_data_calls[0]["records"]), 50)
+            self.assertEqual(len(client.record_data_calls[1]["records"]), 50)
+            self.assertEqual(len(client.record_data_calls[2]["records"]), 25)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -190,6 +190,33 @@ class DataEntrySyncClientTests(unittest.TestCase):
         self.assertEqual(len(response.values), 1)
         self.assertEqual(response.values[0].record, "123")
 
+    def test_parse_record_data_supports_wide_redcap_records(self) -> None:
+        response = parse_record_data_response(
+            {
+                "project_id": "17",
+                "records": [
+                    {
+                        "record_id": "123",
+                        "redcap_event_name": "baseline_arm_1",
+                        "data_access_group_unique_name": "marmara",
+                        "record_last_modified_at": "2026-05-24 10:25:00",
+                        "hasta_ad": "AHMET",
+                        "hasta_soyad": "YILMAZ",
+                        "risk___1": "1",
+                    }
+                ],
+            }
+        )
+
+        by_field = {item.field_name: item for item in response.values}
+        self.assertEqual(len(response.values), 3)
+        self.assertEqual(by_field["hasta_ad"].project_id, "17")
+        self.assertEqual(by_field["hasta_ad"].record, "123")
+        self.assertEqual(by_field["hasta_ad"].event_id, "baseline_arm_1")
+        self.assertEqual(by_field["hasta_ad"].value, "AHMET")
+        self.assertEqual(by_field["hasta_ad"].dag_unique_name, "marmara")
+        self.assertEqual(by_field["risk___1"].value, "1")
+
     def test_parse_identity_hash_map_accepts_identity_hash_key(self) -> None:
         response = parse_identity_hash_map_response(
             {

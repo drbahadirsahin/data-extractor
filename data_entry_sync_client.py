@@ -52,6 +52,29 @@ class IdentityHashMapResponse:
     raw: Any
 
 
+WIDE_RECORD_META_KEYS = {
+    "project_id",
+    "record",
+    "record_id",
+    "id",
+    "event_id",
+    "redcap_event_name",
+    "event",
+    "redcap_repeat_instrument",
+    "redcap_repeat_instance",
+    "instance",
+    "dag_unique_name",
+    "data_access_group_unique_name",
+    "dag",
+    "sync_updated_at",
+    "record_last_modified_at",
+    "remote_updated_at",
+    "last_modified_at",
+    "identity_hash_updated_at",
+    "identity_updated_at",
+}
+
+
 class DataEntrySyncClient:
     def __init__(self, config: DataEntrySyncConfig, api_token: str) -> None:
         self.config = config
@@ -298,7 +321,10 @@ def parse_record_data_response(payload: Any) -> RecordDataResponse:
             rows = first_list(record_context, ["rows", "data", "values"])
             if not rows and "field_name" in record_context:
                 rows = [record_context]
-            values.extend(parse_record_rows(rows, root=root, record_context=record_context))
+            if rows:
+                values.extend(parse_record_rows(rows, root=root, record_context=record_context))
+            else:
+                values.extend(parse_wide_record_row(record_context, root=root))
 
     return RecordDataResponse(project_id=project_id, values=values, raw=payload)
 
@@ -339,6 +365,39 @@ def parse_record_rows(
             )
         )
     return parsed
+
+
+def parse_wide_record_row(row: dict[str, Any], *, root: dict[str, Any]) -> list[RedcapDataValue]:
+    record = first_text(row, ["record", "record_id"])
+    if not record:
+        return []
+    project_id = first_text(row, ["project_id"]) or first_text(root, ["project_id"]) or ""
+    event_id = first_text(row, ["event_id", "redcap_event_name", "event"])
+    instance = first_text(row, ["instance", "redcap_repeat_instance"])
+    dag_unique_name = first_text(row, ["dag_unique_name", "data_access_group_unique_name", "dag"])
+    remote_updated_at = first_text(
+        row,
+        ["sync_updated_at", "record_last_modified_at", "remote_updated_at", "last_modified_at"],
+    )
+    values: list[RedcapDataValue] = []
+    for key, raw_value in row.items():
+        if key in WIDE_RECORD_META_KEYS:
+            continue
+        if isinstance(raw_value, (dict, list)):
+            continue
+        values.append(
+            RedcapDataValue(
+                project_id=project_id,
+                event_id=event_id,
+                record=record,
+                field_name=str(key),
+                value=optional_text(raw_value) or "",
+                instance=instance,
+                dag_unique_name=dag_unique_name,
+                remote_updated_at=remote_updated_at,
+            )
+        )
+    return values
 
 
 def parse_identity_hash_map_response(payload: Any) -> IdentityHashMapResponse:

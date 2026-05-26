@@ -13,9 +13,11 @@ from data_entry_store import DataEntryStore, RedcapDataValue
 from gui.data_entry_page import (
     ClinicalDataEntryPage,
     apply_ai_fill_overrides,
+    build_data_entry_ai_config,
     data_entry_store_path,
     merged_override_payload,
 )
+from project_config import ProjectConfig
 from settings_store import AppSettings, RedcapProjectToken
 
 
@@ -287,6 +289,42 @@ class GuiDataEntryPageTests(unittest.TestCase):
         self.assertEqual(payload["prompt_append"], "B")
         self.assertEqual(payload["selection_rule"], "latest")
         self.assertNotIn("max_candidates", payload)
+
+    def test_build_data_entry_ai_config_uses_release_llm_and_scopes_fields(self) -> None:
+        project_config = ProjectConfig(
+            project_name="Demo",
+            project_id="17",
+            dictionary_path="dictionary.csv",
+            llm={"provider": "ollama", "model": "local"},
+            form_overrides={},
+            field_overrides={},
+        )
+        bundle = SimpleNamespace(config=project_config)
+        runtime = SimpleNamespace(
+            app_config={
+                "llm": {
+                    "provider": "llm_gateway",
+                    "base_url": "https://gateway.example",
+                    "model": "qwen/qwen3.5-9b",
+                },
+                "release": {"profile": "user"},
+            }
+        )
+
+        scoped = build_data_entry_ai_config(
+            runtime=runtime,
+            bundle=bundle,
+            form_name="hasta_bilgileri",
+            field_names=["hasta_ad"],
+            form_override={"selection_rule": "latest"},
+            field_overrides={"hasta_ad": {"max_candidates": 1}},
+        )
+
+        self.assertEqual(scoped.target_forms, ["hasta_bilgileri"])
+        self.assertEqual(scoped.target_fields, ["hasta_ad"])
+        self.assertEqual(scoped.llm["provider"], "llm_gateway")
+        self.assertEqual(scoped.form_overrides["hasta_bilgileri"]["selection_rule"], "latest")
+        self.assertEqual(scoped.field_overrides["hasta_ad"]["max_candidates"], 1)
 
 
 def build_runtime(app_home: Path, config_path: Path):

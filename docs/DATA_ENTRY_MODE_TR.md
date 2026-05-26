@@ -272,6 +272,11 @@ başlatmamalıdır. Doğru akış:
    aynı override payload formatıyla geçici tarama config'ine uygulanır.
 8. LLM çağrısı yalnızca seçili alanlar ve geçici form/alan kuralları ile yapılır.
 
+Form bazlı tarama kök belge tarama akışıyla aynı `PatientQueueExtractionWorker`
+ve aynı progress/cancel dialog yapısını kullanır. Böylece veri giriş ekranı ayrı
+bir LLM tarama mekanizması taşımak yerine mevcut belge tarama altyapısına
+bağlanır.
+
 Bu kurallar proje dosyasına kalıcı yazılmaz; ilgili tarama çalışması için
 geçici scoped config içine eklenir. Ağ tarafında `connection reset` benzeri
 geçici kopmalarda tek kontrollü tekrar denemesi yapılır.

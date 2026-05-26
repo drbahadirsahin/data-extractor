@@ -3,7 +3,6 @@ from __future__ import annotations
 from copy import deepcopy
 import logging
 from pathlib import Path
-import time
 from typing import Any, Callable
 
 from PySide6.QtCore import QObject, Qt, QThread, Signal, Slot
@@ -15,12 +14,14 @@ from data_entry_store import DataEntryStore
 from data_entry_sync_client import DataEntrySyncClient, load_data_entry_sync_config
 from data_entry_sync_service import DataEntrySyncService
 from gui.data_entry_form import DataEntryFormWidget
+from gui.extraction_worker import PendingPatientJob, PatientQueueExtractionWorker
 from gui.i18n import tr
 from identity_registry_client import IdentityRegistryClient, load_identity_registry_config
+from llm_provider import merge_llm_settings
 from redcap_client import RedcapClient
+from release_profile import show_model_settings
 from settings_store import RedcapProjectToken
 from submission_service import normalize_tc_identity_no
-from workspace_extraction import extract_patient_documents
 from workspace_flow import WorkspaceBundle, load_workspace_bundle
 
 
@@ -48,72 +49,40 @@ class DataEntrySyncWorker(QObject):
         self.finished.emit(report)
 
 
-class DataEntryAIFillWorker(QObject):
-    finished = Signal(object)
-    failed = Signal(str)
-
-    def __init__(
-        self,
-        *,
-        config: Any,
-        form_name: str,
-        field_names: list[str],
-        form_override: dict[str, Any] | None = None,
-        field_overrides: dict[str, dict[str, Any]] | None = None,
-        documents: list[str],
-    ) -> None:
-        super().__init__()
-        self.config = config
-        self.form_name = form_name
+class DataEntryAIFillBridge(QObject):
+    def __init__(self, *, page: "ClinicalDataEntryPage", progress: Any, field_names: set[str]) -> None:
+        super().__init__(page.widget)
+        self.page = page
+        self.progress = progress
         self.field_names = field_names
-        self.form_override = form_override or {}
-        self.field_overrides = field_overrides or {}
-        self.documents = documents
 
-    @Slot()
-    def run(self) -> None:
-        try:
-            scoped_config = deepcopy(self.config)
-            scoped_config.target_forms = [self.form_name]
-            scoped_config.target_fields = list(self.field_names)
-            apply_ai_fill_overrides(
-                scoped_config,
-                form_name=self.form_name,
-                form_override=self.form_override,
-                field_overrides=self.field_overrides,
-            )
-            result = self.extract_with_retry(scoped_config)
-            values: dict[str, Any] = {}
+    @Slot(int, str)
+    def update_progress(self, current: int, patient: str) -> None:
+        display_patient = tr("extraction_progress_done", self.page.language) if patient == "done" else patient
+        self.progress.update_progress(current=current, patient=display_patient)
+
+    @Slot(str)
+    def handle_failure(self, error: str) -> None:
+        self.progress.close()
+        self.page.handle_ai_fill_failure(error)
+
+    @Slot(object)
+    def handle_finished(self, payload: dict[str, Any]) -> None:
+        self.progress.close()
+        if payload.get("canceled"):
+            self.page.status_label.setText(tr("data_entry_ai_fill_canceled", self.page.language))
+            return
+        values: dict[str, Any] = {}
+        for result in list(payload.get("results") or []):
             for field_result in result.merged_response.results:
                 if field_result.final_value is None or field_result.status == "not_found":
                     continue
                 values[field_result.field_name] = field_result.final_value
-        except Exception as exc:
-            self.failed.emit(str(exc))
-            return
-        self.finished.emit(values)
+        self.page.handle_ai_fill_success(values, self.field_names)
 
-    def extract_with_retry(self, scoped_config: Any) -> Any:
-        last_error: Exception | None = None
-        for attempt in range(2):
-            try:
-                return extract_patient_documents(
-                    config=scoped_config,
-                    queue_label="data_entry_ai_fill",
-                    patient_mode="existing",
-                    identifier_type=None,
-                    identifier_value=None,
-                    documents=self.documents,
-                )
-            except Exception as exc:
-                last_error = exc
-                if attempt == 0 and is_retryable_llm_error(exc):
-                    time.sleep(2)
-                    continue
-                raise
-        if last_error is not None:
-            raise last_error
-        raise RuntimeError("LLM extraction did not return a result.")
+    @Slot()
+    def cleanup(self) -> None:
+        self.page.cleanup_ai_thread()
 
 
 class ClinicalDataEntryPage:
@@ -142,7 +111,8 @@ class ClinicalDataEntryPage:
         self._sync_thread: QThread | None = None
         self._sync_worker: DataEntrySyncWorker | None = None
         self._ai_thread: QThread | None = None
-        self._ai_worker: DataEntryAIFillWorker | None = None
+        self._ai_worker: PatientQueueExtractionWorker | None = None
+        self._ai_bridge: DataEntryAIFillBridge | None = None
 
         self.widget = QWidget()
         layout = QVBoxLayout(self.widget)
@@ -531,14 +501,18 @@ class ClinicalDataEntryPage:
             return
         if self._ai_thread is not None:
             return
+        start_dir = self.runtime.settings.ui.last_open_directory or str(Path.cwd())
         documents, _selected_filter = QFileDialog.getOpenFileNames(
             self.widget,
             tr("data_entry_ai_fill_select_documents", self.language),
-            "",
+            start_dir,
             "Documents (*.pdf *.txt *.docx *.doc *.rtf *.png *.jpg *.jpeg *.tif *.tiff);;All files (*)",
         )
         if not documents:
             return
+        self.runtime.settings.ui.last_open_directory = str(Path(documents[0]).resolve().parent)
+        if getattr(self.runtime, "settings_store", None) is not None:
+            self.runtime.settings_store.save(self.runtime.settings)
         fill_options = prompt_ai_fill_options(
             self.widget,
             section=section,
@@ -553,32 +527,50 @@ class ClinicalDataEntryPage:
         if fill_options is None:
             return
         field_names = set(fill_options["field_names"])
-        thread = QThread(self.widget)
-        worker = DataEntryAIFillWorker(
-            config=self.bundle.config,
+        config_snapshot = build_data_entry_ai_config(
+            runtime=self.runtime,
+            bundle=self.bundle,
             form_name=section.form_name,
             field_names=list(fill_options["field_names"]),
             form_override=dict(fill_options.get("form_override") or {}),
             field_overrides=dict(fill_options.get("field_overrides") or {}),
-            documents=list(fill_options["documents"]),
         )
+        job = PendingPatientJob(
+            queue_label=section.title,
+            patient_mode="existing",
+            identifier_type=None,
+            identifier_value=None,
+            documents=list(fill_options["documents"]),
+            config_snapshot=config_snapshot,
+        )
+        from gui.progress_dialog import ExtractionProgressDialog
+
+        progress = ExtractionProgressDialog(language=self.language, total=1, parent=self.widget)
+        progress.setWindowTitle(tr("data_entry_ai_fill_form", self.language))
+        progress.title_label.setText(tr("data_entry_ai_fill_running", self.language, form=section.title))
+        progress.show()
+
+        thread = QThread(self.widget)
+        worker = PatientQueueExtractionWorker(jobs=[job])
         worker.moveToThread(thread)
+        bridge = DataEntryAIFillBridge(page=self, progress=progress, field_names=field_names)
         self._ai_thread = thread
         self._ai_worker = worker
+        self._ai_bridge = bridge
         self.ai_fill_button.setEnabled(False)
-        self.sync_progress.setVisible(True)
         self.status_label.setText(tr("data_entry_ai_fill_running", self.language, form=section.title))
-        worker.finished.connect(
-            lambda values, names=field_names: self.handle_ai_fill_success(values, names),
-            Qt.ConnectionType.QueuedConnection,
-        )
-        worker.failed.connect(self.handle_ai_fill_failure, Qt.ConnectionType.QueuedConnection)
+        progress.cancel_button.clicked.connect(lambda checked=False: worker.cancel())
+        progress.rejected.connect(worker.cancel, Qt.ConnectionType.DirectConnection)
+        thread.started.connect(worker.run)
+        worker.progress.connect(bridge.update_progress, Qt.ConnectionType.QueuedConnection)
+        worker.finished.connect(bridge.handle_finished, Qt.ConnectionType.QueuedConnection)
+        worker.failed.connect(bridge.handle_failure, Qt.ConnectionType.QueuedConnection)
         worker.finished.connect(thread.quit)
         worker.failed.connect(thread.quit)
-        thread.started.connect(worker.run)
-        thread.finished.connect(worker.deleteLater)
+        worker.finished.connect(worker.deleteLater)
+        worker.failed.connect(worker.deleteLater)
         thread.finished.connect(thread.deleteLater)
-        thread.finished.connect(self.cleanup_ai_thread, Qt.ConnectionType.QueuedConnection)
+        thread.finished.connect(bridge.cleanup, Qt.ConnectionType.QueuedConnection)
         thread.start()
 
     @Slot(object, object)
@@ -597,7 +589,7 @@ class ClinicalDataEntryPage:
     def cleanup_ai_thread(self) -> None:
         self._ai_thread = None
         self._ai_worker = None
-        self.sync_progress.setVisible(False)
+        self._ai_bridge = None
         self.set_form_actions_enabled(self.current_model is not None)
 
     def start_sync(self, *, auto: bool = False) -> bool:
@@ -1093,6 +1085,36 @@ def ai_fill_field_item_text(field: Any, language: str = "tr") -> str:
     return f"{field.label}\n{field.field_name} · {status}{required}"
 
 
+def build_data_entry_ai_config(
+    *,
+    runtime: Any,
+    bundle: WorkspaceBundle,
+    form_name: str,
+    field_names: list[str],
+    form_override: dict[str, Any] | None,
+    field_overrides: dict[str, dict[str, Any]] | None,
+) -> Any:
+    scoped_config = deepcopy(bundle.config)
+    scoped_config.dictionary_path = str(bundle.config.dictionary_path)
+    scoped_config.target_forms = [form_name]
+    scoped_config.target_fields = list(field_names)
+    scoped_config.llm = effective_data_entry_llm_settings(runtime, bundle)
+    apply_ai_fill_overrides(
+        scoped_config,
+        form_name=form_name,
+        form_override=form_override,
+        field_overrides=field_overrides,
+    )
+    return scoped_config
+
+
+def effective_data_entry_llm_settings(runtime: Any, bundle: WorkspaceBundle) -> dict[str, Any]:
+    app_llm = dict((runtime.app_config or {}).get("llm", {}) or {})
+    if not show_model_settings(runtime.app_config):
+        return app_llm
+    return merge_llm_settings(app_llm, bundle.config.llm)
+
+
 def apply_ai_fill_overrides(
     config: Any,
     *,
@@ -1124,11 +1146,6 @@ def merged_override_payload(existing: dict[str, Any] | None, override: dict[str,
             continue
         merged[key] = value
     return merged
-
-
-def is_retryable_llm_error(exc: Exception) -> bool:
-    text = str(exc).lower()
-    return "connection reset" in text or "errno 54" in text or "temporarily unavailable" in text
 
 
 def prompt_for_new_record(parent: Any, project: RedcapProjectToken, language: str) -> dict[str, Any] | None:

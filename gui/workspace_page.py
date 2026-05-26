@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +17,7 @@ from excel_import import (
     sample_column_values,
 )
 from gui.i18n import tr
+from gui.extraction_worker import PendingPatientJob, PatientQueueExtractionWorker
 from gui.view_models import provider_label_for_key
 from llm_settings import managed_llm_settings_from_config
 from llm_provider import API_KEY_PROVIDER_NAMES, can_resolve_api_key, merge_llm_settings
@@ -25,7 +25,7 @@ from project_config import ProjectConfig
 from release_profile import show_model_settings
 from runtime_context import RuntimeContext
 from submission_service import build_field_specs_by_name
-from workspace_extraction import PatientExtractionResult, extract_patient_documents
+from workspace_extraction import PatientExtractionResult
 from workspace_flow import (
     WorkspaceBundle,
     build_scoped_project_config,
@@ -35,16 +35,6 @@ from workspace_flow import (
     save_workspace_bundle,
     summarize_selection,
 )
-
-
-@dataclass
-class PendingPatientJob:
-    queue_label: str
-    patient_mode: str
-    identifier_type: str | None
-    identifier_value: str | None
-    documents: list[str]
-    config_snapshot: ProjectConfig
 
 
 class ExcelImportWorker(QObject):
@@ -79,43 +69,6 @@ class ExcelImportWorker(QObject):
             self.failed.emit(str(exc))
             return
         self.finished.emit(report)
-
-
-class PatientQueueExtractionWorker(QObject):
-    progress = Signal(int, str)
-    finished = Signal(object)
-    failed = Signal(str)
-
-    def __init__(self, *, jobs: list[PendingPatientJob]) -> None:
-        super().__init__()
-        self.jobs = jobs
-        self._canceled = False
-
-    def cancel(self) -> None:
-        self._canceled = True
-
-    def run(self) -> None:
-        results: list[PatientExtractionResult] = []
-        try:
-            for index, job in enumerate(self.jobs, start=1):
-                if self._canceled:
-                    break
-                self.progress.emit(index - 1, job.queue_label)
-                result = extract_patient_documents(
-                    config=job.config_snapshot,
-                    queue_label=job.queue_label,
-                    patient_mode=job.patient_mode,
-                    identifier_type=job.identifier_type,
-                    identifier_value=job.identifier_value,
-                    documents=job.documents,
-                )
-                results.append(result)
-            if not self._canceled:
-                self.progress.emit(len(self.jobs), "done")
-        except Exception as exc:
-            self.failed.emit(str(exc))
-            return
-        self.finished.emit({"results": results, "canceled": self._canceled})
 
 
 class ExcelImportUiBridge(QObject):

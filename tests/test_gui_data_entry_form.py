@@ -4,6 +4,7 @@ import unittest
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from data_entry_form_model import (
+    DATE_EDITOR,
     FormChoiceModel,
     FormFieldModel,
     FormRenderModel,
@@ -238,6 +239,109 @@ class GuiDataEntryFormTests(unittest.TestCase):
         form.editor_widgets["has_detail"].setText("1")
 
         self.assertFalse(form.field_rows["detail"].isHidden())
+
+    def test_date_editor_collects_ymd_values(self) -> None:
+        get_qapplication()
+        form = DataEntryFormWidget(
+            FormRenderModel(
+                project_id="17",
+                record="1",
+                title="Record 1",
+                sections=[
+                    FormSectionModel(
+                        form_name="form",
+                        title="Form",
+                        fields=[
+                            FormFieldModel(
+                                field_name="dogum_tarihi",
+                                form_name="form",
+                                label="Doğum Tarihi",
+                                editor=DATE_EDITOR,
+                                value="2026-05-28",
+                            )
+                        ],
+                    )
+                ],
+            )
+        )
+
+        self.assertEqual(form.collect_values()["dogum_tarihi"], "2026-05-28")
+
+    def test_dynamic_sql_combo_keeps_existing_value_visible(self) -> None:
+        get_qapplication()
+        form = DataEntryFormWidget(
+            FormRenderModel(
+                project_id="17",
+                record="1",
+                title="Record 1",
+                sections=[
+                    FormSectionModel(
+                        form_name="form",
+                        title="Form",
+                        fields=[
+                            FormFieldModel(
+                                field_name="mr_secimi",
+                                form_name="form",
+                                label="MR seçimi",
+                                editor="dynamic_dropdown",
+                                value="1. MR Tarihi: 2026-05-28",
+                            )
+                        ],
+                    )
+                ],
+            )
+        )
+
+        self.assertEqual(form.collect_values()["mr_secimi"], "1. MR Tarihi: 2026-05-28")
+
+    def test_duplicate_event_fields_use_context_keys(self) -> None:
+        get_qapplication()
+        form = DataEntryFormWidget(
+            FormRenderModel(
+                project_id="17",
+                record="1",
+                title="Record 1",
+                sections=[
+                    FormSectionModel(
+                        form_name="form",
+                        title="Baseline - Form",
+                        event_id="baseline_arm_1",
+                        fields=[
+                            FormFieldModel(
+                                "hasta_ad",
+                                "form",
+                                "Hasta adı",
+                                "text",
+                                "AB",
+                                event_id="baseline_arm_1",
+                                context_key="hasta_ad@@event=baseline_arm_1@@instance=",
+                            )
+                        ],
+                    ),
+                    FormSectionModel(
+                        form_name="form",
+                        title="Followup - Form",
+                        event_id="followup_arm_1",
+                        fields=[
+                            FormFieldModel(
+                                "hasta_ad",
+                                "form",
+                                "Hasta adı",
+                                "text",
+                                "CD",
+                                event_id="followup_arm_1",
+                                context_key="hasta_ad@@event=followup_arm_1@@instance=",
+                            )
+                        ],
+                    ),
+                ],
+            )
+        )
+
+        values = form.collect_values()
+
+        self.assertEqual(values["hasta_ad@@event=baseline_arm_1@@instance="], "AB")
+        self.assertEqual(values["hasta_ad@@event=followup_arm_1@@instance="], "CD")
 
 
 if __name__ == "__main__":

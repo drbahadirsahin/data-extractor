@@ -3,8 +3,10 @@ import unittest
 from data_entry_browser import RecordDetail, RecordFieldValue, RecordFormSection
 from data_entry_form_model import (
     CHECKBOX_EDITOR,
+    DATE_EDITOR,
     DESCRIPTION_EDITOR,
     DROPDOWN_EDITOR,
+    DYNAMIC_DROPDOWN_EDITOR,
     RADIO_EDITOR,
     READONLY_EDITOR,
     TEXT_AREA_EDITOR,
@@ -71,7 +73,7 @@ class DataEntryFormModelTests(unittest.TestCase):
         self.assertFalse(model.fields[0].present)
         self.assertEqual(model.fields[0].value, "")
 
-    def test_prefers_non_empty_value_when_same_field_exists_in_multiple_events(self) -> None:
+    def test_keeps_same_field_values_separate_by_event(self) -> None:
         detail = RecordDetail(
             project_id="17",
             record="96-6",
@@ -99,8 +101,22 @@ class DataEntryFormModelTests(unittest.TestCase):
 
         model = build_form_render_model(detail, fields)
 
-        self.assertEqual(model.fields[0].value, "AH")
-        self.assertEqual(model.fields[0].event_id, "tbbi_bilgiler__tan_arm_1")
+        self.assertEqual([section.event_id for section in model.sections], ["baseline_arm_1", "tbbi_bilgiler__tan_arm_1"])
+        self.assertEqual([section.fields[0].value for section in model.sections], ["", "AH"])
+        self.assertEqual(model.sections[1].fields[0].context_key, "hasta_ad@@event=tbbi_bilgiler__tan_arm_1@@instance=")
+
+    def test_uses_form_event_map_to_group_blank_forms_by_event(self) -> None:
+        detail = RecordDetail(project_id="17", record="1")
+        fields = {"hasta_bilgileri": [FieldSpec("hasta_ad", "hasta_bilgileri", "text", "Hasta adı")]}
+
+        model = build_form_render_model(
+            detail,
+            fields,
+            form_event_map={"hasta_bilgileri": ["baseline_arm_1", "followup_arm_1"]},
+        )
+
+        self.assertEqual([section.event_id for section in model.sections], ["baseline_arm_1", "followup_arm_1"])
+        self.assertEqual([section.fields[0].event_id for section in model.sections], ["baseline_arm_1", "followup_arm_1"])
 
     def test_maps_readonly_and_descriptive_fields(self) -> None:
         detail = RecordDetail(
@@ -126,6 +142,21 @@ class DataEntryFormModelTests(unittest.TestCase):
         self.assertTrue(model.fields[0].read_only)
         self.assertEqual(model.fields[1].editor, DESCRIPTION_EDITOR)
         self.assertEqual(model.fields[1].value, "Read this text")
+
+    def test_maps_date_and_dynamic_sql_fields(self) -> None:
+        detail = RecordDetail(project_id="17", record="1")
+        fields = {
+            "form": [
+                FieldSpec("dogum_tarihi", "form", "text", "Doğum Tarihi", text_validation="date_ymd"),
+                FieldSpec("mr_secimi", "form", "sql", "MR Seçimi"),
+            ]
+        }
+
+        model = build_form_render_model(detail, fields)
+
+        by_name = {field.field_name: field for field in model.fields}
+        self.assertEqual(by_name["dogum_tarihi"].editor, DATE_EDITOR)
+        self.assertEqual(by_name["mr_secimi"].editor, DYNAMIC_DROPDOWN_EDITOR)
 
     def test_hides_hidden_annotation_and_marks_readonly_annotation(self) -> None:
         detail = RecordDetail(project_id="17", record="1")

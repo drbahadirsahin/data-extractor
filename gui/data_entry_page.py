@@ -335,6 +335,7 @@ class ClinicalDataEntryPage:
                 detail,
                 self.bundle.grouped_fields,
                 form_labels=self.bundle.config.form_labels,
+                form_event_map=self.bundle.config.form_event_map,
                 title=tr("data_entry_record_title", self.language, record=record),
             )
         except Exception as exc:
@@ -398,6 +399,7 @@ class ClinicalDataEntryPage:
             detail,
             self.bundle.grouped_fields,
             form_labels=self.bundle.config.form_labels,
+            form_event_map=self.bundle.config.form_event_map,
             title=tr("data_entry_record_title", self.language, record=record_id),
         )
         self.form_widget.set_model(self.current_model)

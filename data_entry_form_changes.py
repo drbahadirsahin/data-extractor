@@ -64,10 +64,11 @@ def build_form_change_set(
             changes.extend(field_changes)
             unchanged_count += field_unchanged
             continue
-        if field.field_name not in submitted_values:
+        submitted_key = field_submission_key(field)
+        if submitted_key not in submitted_values:
             continue
         old_value = normalize_scalar_value(field.value_text)
-        new_value = normalize_scalar_value(submitted_values.get(field.field_name))
+        new_value = normalize_scalar_value(submitted_values.get(submitted_key))
         if old_value == new_value:
             unchanged_count += 1
             continue
@@ -130,8 +131,9 @@ def checkbox_field_changes(
     old_selected = set(field.value if isinstance(field.value, list) else [])
     changes: list[DataEntryFieldChange] = []
     unchanged_count = 0
+    field_key = field_submission_key(field)
     for choice in field.choices:
-        submitted_key = f"{field.field_name}___{choice.code}"
+        submitted_key = f"{field_key}___{choice.code}"
         if submitted_key not in submitted_values:
             continue
         old_value = "1" if choice.code in old_selected else "0"
@@ -143,7 +145,7 @@ def checkbox_field_changes(
             DataEntryFieldChange(
                 project_id=model.project_id,
                 record=model.record,
-                field_name=submitted_key,
+                field_name=f"{field.field_name}___{choice.code}",
                 old_value=old_value,
                 new_value=new_value,
                 event_id=field.event_id,
@@ -153,6 +155,10 @@ def checkbox_field_changes(
             )
         )
     return changes, unchanged_count
+
+
+def field_submission_key(field: FormFieldModel) -> str:
+    return field.context_key or field.field_name
 
 
 def normalize_scalar_value(value: Any) -> str:

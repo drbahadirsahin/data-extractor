@@ -9,6 +9,7 @@ from helpers import ChoiceSpec
 
 TEXT_EDITOR = "text"
 TEXT_AREA_EDITOR = "textarea"
+DATE_EDITOR = "date"
 DROPDOWN_EDITOR = "dropdown"
 RADIO_EDITOR = "radio"
 CHECKBOX_EDITOR = "checkbox"
@@ -44,6 +45,7 @@ class FormFieldModel:
     dirty: bool = False
     event_id: str = ""
     instance: str = ""
+    context_key: str = ""
 
     @property
     def value_text(self) -> str:
@@ -57,6 +59,9 @@ class FormSectionModel:
     form_name: str
     title: str
     fields: list[FormFieldModel] = field(default_factory=list)
+    event_id: str = ""
+    instance: str = ""
+    context_key: str = ""
 
 
 @dataclass(frozen=True)
@@ -78,18 +83,24 @@ def build_form_render_model(
     field_specs_by_form: dict[str, list[Any]],
     *,
     form_labels: dict[str, str] | None = None,
+    form_event_map: dict[str, list[str]] | None = None,
     title: str | None = None,
 ) -> FormRenderModel:
     form_labels = form_labels or {}
-    direct_values = direct_value_map(detail.field_values)
-    checkbox_values = checkbox_value_map(detail.field_values)
+    form_event_map = normalize_form_event_map(form_event_map)
+    contexts_by_form = form_contexts_by_form(detail.field_values, field_specs_by_form, form_event_map)
     sections: list[FormSectionModel] = []
-    for form_name, field_specs in field_specs_by_form.items():
+    for form_name, event_id, instance in ordered_form_contexts(field_specs_by_form, contexts_by_form):
+        field_specs = field_specs_by_form[form_name]
+        direct_values = direct_value_map(detail.field_values, event_id=event_id, instance=instance)
+        checkbox_values = checkbox_value_map(detail.field_values, event_id=event_id, instance=instance)
         fields = [
             build_field_model(
                 spec,
                 direct_values=direct_values,
                 checkbox_values=checkbox_values,
+                event_id=event_id,
+                instance=instance,
             )
             for spec in field_specs
         ]
@@ -99,8 +110,11 @@ def build_form_render_model(
         sections.append(
             FormSectionModel(
                 form_name=form_name,
-                title=form_labels.get(form_name) or form_name,
+                title=section_title(form_labels.get(form_name) or form_name, event_id=event_id, instance=instance),
                 fields=fields,
+                event_id=event_id,
+                instance=instance,
+                context_key=section_context_key(form_name, event_id, instance),
             )
         )
     return FormRenderModel(
@@ -118,6 +132,8 @@ def build_field_model(
     *,
     direct_values: dict[str, RecordFieldValue],
     checkbox_values: dict[str, set[str]],
+    event_id: str = "",
+    instance: str = "",
 ) -> FormFieldModel:
     field_name = metadata_text(field_spec, "field_name")
     field_type = metadata_text(field_spec, "field_type").lower()
@@ -125,9 +141,14 @@ def build_field_model(
     choices = choices_for_field(field_spec, field_type=field_type)
     direct_value = direct_values.get(field_name)
     editor = editor_for_field(field_spec, field_type=field_type)
+    validation = metadata_optional_text(field_spec, "text_validation")
+    if editor == TEXT_EDITOR and is_date_validation(validation):
+        editor = DATE_EDITOR
     annotations = metadata_annotations(field_spec)
     read_only = editor in {READONLY_EDITOR, DESCRIPTION_EDITOR} or annotation_has(annotations, "@READONLY")
     hidden = annotation_has(annotations, "@HIDDEN")
+    field_event_id = direct_value.event_id if direct_value is not None else normalize_context_part(event_id)
+    field_instance = direct_value.instance if direct_value is not None else normalize_context_part(instance)
     if editor == CHECKBOX_EDITOR:
         value: str | list[str] = sorted(checkbox_values.get(field_name, set()))
         present = bool(value) or direct_value is not None
@@ -149,7 +170,7 @@ def build_field_model(
         field_type=field_type,
         choices=choices,
         note=metadata_optional_text(field_spec, "field_note"),
-        validation=metadata_optional_text(field_spec, "text_validation"),
+        validation=validation,
         validation_min=metadata_optional_text(field_spec, "text_validation_min"),
         validation_max=metadata_optional_text(field_spec, "text_validation_max"),
         required=metadata_bool(field_spec, "required"),
@@ -158,15 +179,23 @@ def build_field_model(
         hidden=hidden,
         present=present,
         dirty=dirty,
-        event_id=direct_value.event_id if direct_value is not None else "",
-        instance=direct_value.instance if direct_value is not None else "",
+        event_id=field_event_id,
+        instance=field_instance,
+        context_key=field_context_key(field_name, field_event_id, field_instance),
     )
 
 
-def direct_value_map(values: Iterable[RecordFieldValue]) -> dict[str, RecordFieldValue]:
+def direct_value_map(
+    values: Iterable[RecordFieldValue],
+    *,
+    event_id: str = "",
+    instance: str = "",
+) -> dict[str, RecordFieldValue]:
     mapped: dict[str, RecordFieldValue] = {}
     for value in values:
         if "___" in value.field_name:
+            continue
+        if not record_value_matches_context(value, event_id=event_id, instance=instance):
             continue
         existing = mapped.get(value.field_name)
         if existing is None or record_value_is_better(value, existing):
@@ -186,10 +215,17 @@ def record_value_is_better(candidate: RecordFieldValue, current: RecordFieldValu
     return False
 
 
-def checkbox_value_map(values: Iterable[RecordFieldValue]) -> dict[str, set[str]]:
+def checkbox_value_map(
+    values: Iterable[RecordFieldValue],
+    *,
+    event_id: str = "",
+    instance: str = "",
+) -> dict[str, set[str]]:
     mapped: dict[str, set[str]] = {}
     for value in values:
         if "___" not in value.field_name:
+            continue
+        if not record_value_matches_context(value, event_id=event_id, instance=instance):
             continue
         field_name, code = value.field_name.rsplit("___", 1)
         if checkbox_value_is_selected(value.value):
@@ -200,6 +236,131 @@ def checkbox_value_map(values: Iterable[RecordFieldValue]) -> dict[str, set[str]
 def checkbox_value_is_selected(value: Any) -> bool:
     normalized = str(value or "").strip().lower()
     return normalized not in {"", "0", "false", "no", "hayir", "hay\u0131r"}
+
+
+def form_contexts_by_form(
+    values: Iterable[RecordFieldValue],
+    field_specs_by_form: dict[str, list[Any]],
+    form_event_map: dict[str, list[str]],
+) -> dict[str, list[tuple[str, str]]]:
+    value_list = list(values)
+    contexts: dict[str, list[tuple[str, str]]] = {}
+    for form_name, field_specs in field_specs_by_form.items():
+        field_names = {metadata_text(spec, "field_name") for spec in field_specs if metadata_text(spec, "field_name")}
+        form_contexts: list[tuple[str, str]] = []
+        for event_name in form_event_map.get(form_name, []):
+            append_context(form_contexts, event_name, "")
+        for value in value_list:
+            if redcap_base_field_name(value.field_name) not in field_names:
+                continue
+            append_context(form_contexts, value.event_id, value.instance)
+        if not form_contexts:
+            form_contexts.append(("", ""))
+        contexts[form_name] = form_contexts
+    return contexts
+
+
+def ordered_form_contexts(
+    field_specs_by_form: dict[str, list[Any]],
+    contexts_by_form: dict[str, list[tuple[str, str]]],
+) -> list[tuple[str, str, str]]:
+    has_event_context = any(
+        event_id or instance
+        for contexts in contexts_by_form.values()
+        for event_id, instance in contexts
+    )
+    if not has_event_context:
+        return [
+            (form_name, event_id, instance)
+            for form_name in field_specs_by_form
+            for event_id, instance in contexts_by_form.get(form_name, [("", "")])
+        ]
+    ordered_contexts: list[tuple[str, str]] = []
+    for form_name in field_specs_by_form:
+        for event_id, instance in contexts_by_form.get(form_name, []):
+            append_context(ordered_contexts, event_id, instance)
+    ordered: list[tuple[str, str, str]] = []
+    for event_id, instance in ordered_contexts:
+        for form_name in field_specs_by_form:
+            if (event_id, instance) in contexts_by_form.get(form_name, []):
+                ordered.append((form_name, event_id, instance))
+    return ordered
+
+
+def append_context(contexts: list[tuple[str, str]], event_id: str | None, instance: str | None) -> None:
+    context = (normalize_context_part(event_id), normalize_context_part(instance))
+    if context not in contexts:
+        contexts.append(context)
+
+
+def record_value_matches_context(value: RecordFieldValue, *, event_id: str, instance: str) -> bool:
+    return (
+        normalize_context_part(value.event_id) == normalize_context_part(event_id)
+        and normalize_context_part(value.instance) == normalize_context_part(instance)
+    )
+
+
+def normalize_context_part(value: Any) -> str:
+    return str(value or "").strip()
+
+
+def redcap_base_field_name(field_name: str) -> str:
+    text = str(field_name or "")
+    if "___" in text:
+        return text.rsplit("___", 1)[0]
+    return text
+
+
+def field_context_key(field_name: str, event_id: str = "", instance: str = "") -> str:
+    event_key = normalize_context_part(event_id)
+    instance_key = normalize_context_part(instance)
+    if not event_key and not instance_key:
+        return str(field_name)
+    return f"{field_name}@@event={event_key}@@instance={instance_key}"
+
+
+def section_context_key(form_name: str, event_id: str = "", instance: str = "") -> str:
+    return field_context_key(form_name, event_id, instance)
+
+
+def section_title(base_title: str, *, event_id: str = "", instance: str = "") -> str:
+    context_parts: list[str] = []
+    if event_id:
+        context_parts.append(humanize_event_name(event_id))
+    if instance:
+        context_parts.append(f"Tekrar {instance}")
+    if not context_parts:
+        return base_title
+    return f"{' / '.join(context_parts)} - {base_title}"
+
+
+def humanize_event_name(event_id: str) -> str:
+    text = str(event_id or "").strip()
+    if not text:
+        return ""
+    text = text.replace("_arm_", " arm ")
+    return text.replace("_", " ").strip().title()
+
+
+def normalize_form_event_map(form_event_map: dict[str, list[str]] | None) -> dict[str, list[str]]:
+    if not form_event_map:
+        return {}
+    normalized: dict[str, list[str]] = {}
+    for form_name, events in form_event_map.items():
+        if not form_name:
+            continue
+        bucket: list[str] = []
+        for event_name in events or []:
+            event_key = normalize_context_part(event_name)
+            if event_key and event_key not in bucket:
+                bucket.append(event_key)
+        if bucket:
+            normalized[str(form_name)] = bucket
+    return normalized
+
+
+def is_date_validation(validation: str | None) -> bool:
+    return str(validation or "").strip().lower().startswith("date")
 
 
 def choices_for_field(field_spec: Any, *, field_type: str) -> list[FormChoiceModel]:

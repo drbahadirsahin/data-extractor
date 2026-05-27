@@ -168,6 +168,60 @@ class DataEntryFormChangesTests(unittest.TestCase):
             self.assertEqual(result.queued_count, 0)
             self.assertEqual(store.pending_changes("17"), [])
 
+    def test_build_change_set_preserves_event_context_for_duplicate_fields(self) -> None:
+        model = FormRenderModel(
+            project_id="17",
+            record="1",
+            title="Record 1",
+            sections=[
+                FormSectionModel(
+                    form_name="form",
+                    title="Baseline - Form",
+                    event_id="baseline_arm_1",
+                    fields=[
+                        FormFieldModel(
+                            "hasta_ad",
+                            "form",
+                            "Hasta adi",
+                            "text",
+                            "AB",
+                            event_id="baseline_arm_1",
+                            context_key="hasta_ad@@event=baseline_arm_1@@instance=",
+                        )
+                    ],
+                ),
+                FormSectionModel(
+                    form_name="form",
+                    title="Followup - Form",
+                    event_id="followup_arm_1",
+                    fields=[
+                        FormFieldModel(
+                            "hasta_ad",
+                            "form",
+                            "Hasta adi",
+                            "text",
+                            "CD",
+                            event_id="followup_arm_1",
+                            context_key="hasta_ad@@event=followup_arm_1@@instance=",
+                        )
+                    ],
+                ),
+            ],
+        )
+
+        change_set = build_form_change_set(
+            model,
+            {
+                "hasta_ad@@event=baseline_arm_1@@instance=": "AB",
+                "hasta_ad@@event=followup_arm_1@@instance=": "EF",
+            },
+        )
+
+        self.assertEqual(len(change_set.changes), 1)
+        self.assertEqual(change_set.changes[0].field_name, "hasta_ad")
+        self.assertEqual(change_set.changes[0].event_id, "followup_arm_1")
+        self.assertEqual(change_set.changes[0].new_value, "EF")
+
 
 if __name__ == "__main__":
     unittest.main()

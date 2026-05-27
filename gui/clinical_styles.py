@@ -250,7 +250,7 @@ QPushButton[tab="true"][active="true"] {
     border: 1px solid #102027;
 }
 
-QLineEdit, QComboBox {
+QLineEdit, QComboBox, QDateEdit {
     background: #ffffff;
     border: 1px solid #d8d5cc;
     border-radius: 7px;
@@ -259,7 +259,7 @@ QLineEdit, QComboBox {
     selection-background-color: #b8e4dc;
 }
 
-QLineEdit:focus, QComboBox:focus {
+QLineEdit:focus, QComboBox:focus, QDateEdit:focus {
     border: 1px solid #0f766e;
 }
 

@@ -5,6 +5,7 @@ from typing import Any
 
 from data_entry_form_model import (
     CHECKBOX_EDITOR,
+    DATE_EDITOR,
     DESCRIPTION_EDITOR,
     DROPDOWN_EDITOR,
     DYNAMIC_DROPDOWN_EDITOR,
@@ -194,13 +195,16 @@ class DataEntryFormWidget:
             branching.setObjectName("DataEntryBranchingLogic")
             branching.setWordWrap(True)
             layout.addWidget(branching)
-        self.field_rows[field.field_name] = row
-        self.field_models[field.field_name] = field
-        self.field_state_labels[field.field_name] = state_label
-        self.update_field_row_state(field.field_name)
+        field_key = field_widget_key(field)
+        self.field_rows[field_key] = row
+        self.field_models[field_key] = field
+        self.field_state_labels[field_key] = state_label
+        self.update_field_row_state(field_key)
         return row
 
     def build_editor(self, field: FormFieldModel) -> Any:
+        if field.editor == DATE_EDITOR:
+            return self.build_date_edit(field)
         if field.editor == TEXT_AREA_EDITOR:
             return self.build_text_area(field)
         if field.editor in {DROPDOWN_EDITOR, DYNAMIC_DROPDOWN_EDITOR}:
@@ -216,49 +220,83 @@ class DataEntryFormWidget:
     def build_line_edit(self, field: FormFieldModel) -> Any:
         from PySide6.QtWidgets import QLineEdit, QSizePolicy
 
+        field_key = field_widget_key(field)
         editor = QLineEdit(field.value_text)
         editor.setObjectName("DataEntryLineEdit")
         editor.setProperty("field_name", field.field_name)
+        editor.setProperty("field_key", field_key)
         editor.setReadOnly(field.read_only)
         editor.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         configure_line_edit_validation(editor, field)
-        editor.textChanged.connect(lambda _text=None, name=field.field_name: self.handle_field_changed(name))
-        self.editor_widgets[field.field_name] = editor
+        editor.textChanged.connect(lambda _text=None, key=field_key: self.handle_field_changed(key))
+        self.editor_widgets[field_key] = editor
+        return editor
+
+    def build_date_edit(self, field: FormFieldModel) -> Any:
+        from PySide6.QtCore import QDate
+        from PySide6.QtWidgets import QDateEdit, QSizePolicy
+
+        field_key = field_widget_key(field)
+        editor = QDateEdit()
+        editor.setObjectName("DataEntryDateEdit")
+        editor.setProperty("field_name", field.field_name)
+        editor.setProperty("field_key", field_key)
+        editor.setCalendarPopup(True)
+        editor.setDisplayFormat("yyyy-MM-dd")
+        editor.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        minimum_date = QDate(1900, 1, 1)
+        editor.setMinimumDate(minimum_date)
+        editor.setSpecialValueText("")
+        parsed = QDate.fromString(field.value_text, "yyyy-MM-dd")
+        editor.setDate(parsed if parsed.isValid() else minimum_date)
+        editor.setEnabled(not field.read_only)
+        editor.dateChanged.connect(lambda _date=None, key=field_key: self.handle_field_changed(key))
+        self.editor_widgets[field_key] = editor
         return editor
 
     def build_text_area(self, field: FormFieldModel) -> Any:
         from PySide6.QtWidgets import QPlainTextEdit
 
+        field_key = field_widget_key(field)
         editor = QPlainTextEdit(field.value_text)
         editor.setObjectName("DataEntryTextArea")
         editor.setProperty("field_name", field.field_name)
+        editor.setProperty("field_key", field_key)
         editor.setMinimumHeight(96)
         editor.setReadOnly(field.read_only)
-        editor.textChanged.connect(lambda name=field.field_name: self.handle_field_changed(name))
-        self.editor_widgets[field.field_name] = editor
+        editor.textChanged.connect(lambda key=field_key: self.handle_field_changed(key))
+        self.editor_widgets[field_key] = editor
         return editor
 
     def build_combo(self, field: FormFieldModel) -> Any:
         from PySide6.QtWidgets import QComboBox, QSizePolicy
 
+        field_key = field_widget_key(field)
         editor = QComboBox()
         editor.setObjectName("DataEntryCombo")
         editor.setProperty("field_name", field.field_name)
+        editor.setProperty("field_key", field_key)
         editor.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         editor.addItem("", "")
         for choice in field.choices:
             editor.addItem(choice.label, choice.code)
+        if field.editor == DYNAMIC_DROPDOWN_EDITOR and not field.choices:
+            if field.value_text:
+                editor.addItem(field.value_text, field.value_text)
+            else:
+                editor.addItem(tr("data_entry_dynamic_sql_unresolved", self.language), "")
         index = editor.findData(field.value_text)
         if index >= 0:
             editor.setCurrentIndex(index)
         editor.setEnabled(not field.read_only)
-        editor.currentIndexChanged.connect(lambda _index=None, name=field.field_name: self.handle_field_changed(name))
-        self.editor_widgets[field.field_name] = editor
+        editor.currentIndexChanged.connect(lambda _index=None, key=field_key: self.handle_field_changed(key))
+        self.editor_widgets[field_key] = editor
         return editor
 
     def build_radio_group(self, field: FormFieldModel) -> Any:
         from PySide6.QtWidgets import QButtonGroup, QFrame, QRadioButton, QVBoxLayout
 
+        field_key = field_widget_key(field)
         frame = QFrame()
         frame.setObjectName("DataEntryChoiceGroup")
         layout = QVBoxLayout(frame)
@@ -271,16 +309,17 @@ class DataEntryFormWidget:
             button.setProperty("choice_code", choice.code)
             button.setChecked(choice.code == field.value_text)
             button.setEnabled(not field.read_only)
-            button.toggled.connect(lambda _checked=False, name=field.field_name: self.handle_field_changed(name))
+            button.toggled.connect(lambda _checked=False, key=field_key: self.handle_field_changed(key))
             group.addButton(button)
             layout.addWidget(button)
         frame._data_entry_button_group = group
-        self.editor_widgets[field.field_name] = group
+        self.editor_widgets[field_key] = group
         return frame
 
     def build_checkbox_group(self, field: FormFieldModel) -> Any:
         from PySide6.QtWidgets import QCheckBox, QFrame, QVBoxLayout
 
+        field_key = field_widget_key(field)
         selected = set(field.value if isinstance(field.value, list) else [])
         frame = QFrame()
         frame.setObjectName("DataEntryChoiceGroup")
@@ -293,20 +332,21 @@ class DataEntryFormWidget:
             checkbox.setProperty("choice_code", choice.code)
             checkbox.setChecked(choice.code in selected)
             checkbox.setEnabled(not field.read_only)
-            checkbox.toggled.connect(lambda _checked=False, name=field.field_name: self.handle_field_changed(name))
+            checkbox.toggled.connect(lambda _checked=False, key=field_key: self.handle_field_changed(key))
             boxes.append(checkbox)
             layout.addWidget(checkbox)
-        self.editor_widgets[field.field_name] = boxes
+        self.editor_widgets[field_key] = boxes
         return frame
 
     def build_readonly(self, field: FormFieldModel) -> Any:
         from PySide6.QtWidgets import QLabel
 
+        field_key = field_widget_key(field)
         value = field.value_text or "-"
         label = QLabel(value)
         label.setObjectName("DataEntryReadonlyValue")
         label.setWordWrap(True)
-        self.editor_widgets[field.field_name] = label
+        self.editor_widgets[field_key] = label
         return label
 
     def collect_values(self, *, include_hidden: bool = False) -> dict[str, Any]:
@@ -314,25 +354,28 @@ class DataEntryFormWidget:
             return {}
         values: dict[str, Any] = {}
         for field in self.model.fields:
-            widget = self.editor_widgets.get(field.field_name)
-            row = self.field_rows.get(field.field_name)
+            field_key = field_widget_key(field)
+            widget = self.editor_widgets.get(field_key)
+            row = self.field_rows.get(field_key)
             if not include_hidden and row is not None and row.isHidden():
                 continue
             if widget is None or field.read_only or field.editor == DESCRIPTION_EDITOR:
                 continue
             if field.editor == TEXT_AREA_EDITOR:
-                values[field.field_name] = widget.toPlainText()
+                values[field_key] = widget.toPlainText()
+            elif field.editor == DATE_EDITOR:
+                values[field_key] = date_edit_value(widget)
             elif field.editor == TEXT_EDITOR:
-                values[field.field_name] = widget.text()
+                values[field_key] = widget.text()
             elif field.editor in {DROPDOWN_EDITOR, DYNAMIC_DROPDOWN_EDITOR}:
-                values[field.field_name] = widget.currentData()
+                values[field_key] = widget.currentData()
             elif field.editor == RADIO_EDITOR:
                 checked = widget.checkedButton()
-                values[field.field_name] = checked.property("choice_code") if checked is not None else ""
+                values[field_key] = checked.property("choice_code") if checked is not None else ""
             elif field.editor == CHECKBOX_EDITOR:
                 for checkbox in widget:
                     choice_code = checkbox.property("choice_code")
-                    values[f"{field.field_name}___{choice_code}"] = "1" if checkbox.isChecked() else "0"
+                    values[f"{field_key}___{choice_code}"] = "1" if checkbox.isChecked() else "0"
         return values
 
     def collect_change_set(self):
@@ -355,22 +398,30 @@ class DataEntryFormWidget:
     def apply_values(self, values: dict[str, Any], *, field_names: set[str] | None = None) -> int:
         applied = 0
         for field in (self.model.fields if self.model is not None else []):
-            if field_names is not None and field.field_name not in field_names:
+            field_key = field_widget_key(field)
+            if field_names is not None and field.field_name not in field_names and field_key not in field_names:
                 continue
-            if field.field_name not in values:
+            submitted_key = field_key if field_key in values else field.field_name
+            if submitted_key not in values:
                 continue
-            if self.apply_field_value(field, values[field.field_name]):
+            if self.apply_field_value(field, values[submitted_key]):
                 applied += 1
         self.update_branching_visibility()
         self.refresh_field_states()
         return applied
 
     def apply_field_value(self, field: FormFieldModel, value: Any) -> bool:
-        widget = self.editor_widgets.get(field.field_name)
+        widget = self.editor_widgets.get(field_widget_key(field))
         if widget is None or field.read_only or field.editor == DESCRIPTION_EDITOR:
             return False
         if field.editor == TEXT_AREA_EDITOR:
             widget.setPlainText(str(value or ""))
+            return True
+        if field.editor == DATE_EDITOR:
+            from PySide6.QtCore import QDate
+
+            parsed = QDate.fromString(str(value or ""), "yyyy-MM-dd")
+            widget.setDate(parsed if parsed.isValid() else widget.minimumDate())
             return True
         if field.editor == TEXT_EDITOR:
             widget.setText(str(value or ""))
@@ -399,26 +450,26 @@ class DataEntryFormWidget:
     def update_branching_visibility(self) -> None:
         if self.model is None:
             return
-        values = self.collect_values(include_hidden=True)
         for field in self.model.fields:
-            row = self.field_rows.get(field.field_name)
+            row = self.field_rows.get(field_widget_key(field))
             if row is None or not field.branching_logic:
                 continue
+            values = self.branching_values_for_context(field)
             row.setVisible(evaluate_branching_logic(field.branching_logic, values))
         self.refresh_field_states()
 
-    def handle_field_changed(self, field_name: str) -> None:
-        self.update_field_row_state(field_name)
+    def handle_field_changed(self, field_key: str) -> None:
+        self.update_field_row_state(field_key)
         self.update_branching_visibility()
 
     def refresh_field_states(self) -> None:
         for field_name in list(self.field_rows):
             self.update_field_row_state(field_name)
 
-    def update_field_row_state(self, field_name: str) -> None:
-        field = self.field_models.get(field_name)
-        row = self.field_rows.get(field_name)
-        state_label = self.field_state_labels.get(field_name)
+    def update_field_row_state(self, field_key: str) -> None:
+        field = self.field_models.get(field_key)
+        row = self.field_rows.get(field_key)
+        state_label = self.field_state_labels.get(field_key)
         if field is None or row is None or state_label is None:
             return
         state = field_state(field, self.current_field_value(field))
@@ -429,11 +480,13 @@ class DataEntryFormWidget:
         repolish(state_label)
 
     def current_field_value(self, field: FormFieldModel) -> Any:
-        widget = self.editor_widgets.get(field.field_name)
+        widget = self.editor_widgets.get(field_widget_key(field))
         if widget is None:
             return field.value
         if field.editor == TEXT_AREA_EDITOR:
             return widget.toPlainText()
+        if field.editor == DATE_EDITOR:
+            return date_edit_value(widget)
         if field.editor == TEXT_EDITOR:
             return widget.text()
         if field.editor in {DROPDOWN_EDITOR, DYNAMIC_DROPDOWN_EDITOR}:
@@ -449,6 +502,20 @@ class DataEntryFormWidget:
             ]
         return field.value
 
+    def branching_values_for_context(self, target_field: FormFieldModel) -> dict[str, Any]:
+        values: dict[str, Any] = {}
+        for field in self.model.fields if self.model is not None else []:
+            if field.event_id != target_field.event_id or field.instance != target_field.instance:
+                continue
+            value = self.current_field_value(field)
+            if field.editor == CHECKBOX_EDITOR:
+                selected = {str(item) for item in value} if isinstance(value, list) else set()
+                for choice in field.choices:
+                    values[f"{field.field_name}___{choice.code}"] = "1" if choice.code in selected else "0"
+                continue
+            values[field.field_name] = value
+        return values
+
 
 def clear_layout(layout: Any) -> None:
     while layout.count():
@@ -459,6 +526,17 @@ def clear_layout(layout: Any) -> None:
             widget.deleteLater()
         elif child_layout is not None:
             clear_layout(child_layout)
+
+
+def field_widget_key(field: FormFieldModel) -> str:
+    return field.context_key or field.field_name
+
+
+def date_edit_value(editor: Any) -> str:
+    date = editor.date()
+    if date == editor.minimumDate():
+        return ""
+    return date.toString("yyyy-MM-dd")
 
 
 def field_uses_full_width(field: FormFieldModel) -> bool:

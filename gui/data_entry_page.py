@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import json
 import logging
 from pathlib import Path
 from typing import Any, Callable
@@ -22,7 +23,7 @@ from redcap_client import RedcapClient
 from release_profile import show_model_settings
 from settings_store import RedcapProjectToken
 from submission_service import normalize_tc_identity_no
-from workspace_flow import WorkspaceBundle, load_workspace_bundle
+from workspace_flow import WorkspaceBundle, ensure_server_metadata_in_config, load_workspace_bundle
 
 
 class DataEntrySyncWorker(QObject):
@@ -271,6 +272,9 @@ class ClinicalDataEntryPage:
             if not config_path.exists():
                 continue
             try:
+                token = self.runtime.secrets_store.get(project.token_secret_name)
+                if token and project_config_needs_event_labels(config_path):
+                    ensure_server_metadata_in_config(config_path, api_url=project.api_url, api_token=token)
                 bundle = load_workspace_bundle(config_path)
             except Exception as exc:
                 self.status_label.setText(tr("data_entry_metadata_failed", self.language, error=str(exc)))
@@ -335,6 +339,7 @@ class ClinicalDataEntryPage:
                 detail,
                 self.bundle.grouped_fields,
                 form_labels=self.bundle.config.form_labels,
+                event_labels=self.bundle.config.event_labels,
                 form_event_map=self.bundle.config.form_event_map,
                 title=tr("data_entry_record_title", self.language, record=record),
             )
@@ -399,6 +404,7 @@ class ClinicalDataEntryPage:
             detail,
             self.bundle.grouped_fields,
             form_labels=self.bundle.config.form_labels,
+            event_labels=self.bundle.config.event_labels,
             form_event_map=self.bundle.config.form_event_map,
             title=tr("data_entry_record_title", self.language, record=record_id),
         )
@@ -709,6 +715,20 @@ def candidate_project_config_paths(runtime: Any, project_id: str) -> list[Path]:
         seen.add(candidate)
         deduped.append(candidate)
     return deduped
+
+
+def project_config_needs_event_labels(config_path: Path) -> bool:
+    try:
+        payload = json.loads(config_path.read_text(encoding="utf-8"))
+    except Exception:
+        return False
+    event_labels = payload.get("event_labels")
+    form_event_map = payload.get("form_event_map")
+    if event_labels:
+        return False
+    if not isinstance(form_event_map, dict):
+        return False
+    return any(bool(events) for events in form_event_map.values())
 
 
 def data_entry_label_fields(app_config: dict[str, Any]) -> list[str]:

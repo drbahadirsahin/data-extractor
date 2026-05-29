@@ -10,6 +10,7 @@ class ProjectConfig:
     project_id: str = ""
     dictionary_path: str = ""
     form_labels: dict[str, str] = field(default_factory=dict)
+    event_labels: dict[str, str] = field(default_factory=dict)
     form_event_map: dict[str, list[str]] = field(default_factory=dict)
     target_forms: list[str] | None = None
     target_fields: list[str] | None = None
@@ -27,6 +28,7 @@ class ProjectConfig:
     def __post_init__(self):
         self.llm = dict(self.llm)
         self.form_labels = dict(self.form_labels)
+        self.event_labels = dict(self.event_labels)
         self.dictionary_legend = dict(self.dictionary_legend)
         self.prompting = dict(self.prompting)
 

@@ -6,6 +6,7 @@ from redcap_client import (
     RedcapAPIError,
     RedcapClient,
     build_redcap_api_url_candidates,
+    event_labels_from_event_rows,
     has_redcap_user_context_value,
     load_redcap_user_context_module_config,
     normalize_redcap_api_url,
@@ -121,6 +122,24 @@ class RedcapClientTests(unittest.TestCase):
         parsed = parse_form_event_mapping_response(response)
         self.assertEqual(parsed["hasta_bilgileri"], ["event_1_arm_1"])
         self.assertEqual(parsed["tan_laboratuvar_sonucu"], ["event_1_arm_1"])
+
+    def test_event_labels_from_event_rows_uses_redcap_event_label(self) -> None:
+        labels = event_labels_from_event_rows(
+            [
+                {
+                    "unique_event_name": "tbbi_bilgiler__tan_arm_1",
+                    "event_name": "Tıbbi Bilgiler",
+                },
+                {
+                    "unique_event_name": "izlem_arm_1",
+                    "event_name": "İzlem",
+                    "custom_event_label": "Kontrol İzlemi",
+                },
+            ]
+        )
+
+        self.assertEqual(labels["tbbi_bilgiler__tan_arm_1"], "Tıbbi Bilgiler")
+        self.assertEqual(labels["izlem_arm_1"], "Kontrol İzlemi")
 
     def test_parse_repeating_events_response_supports_json(self) -> None:
         response = json.dumps(

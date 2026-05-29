@@ -60,6 +60,7 @@ class FormSectionModel:
     title: str
     fields: list[FormFieldModel] = field(default_factory=list)
     event_id: str = ""
+    event_label: str = ""
     instance: str = ""
     context_key: str = ""
 
@@ -83,10 +84,12 @@ def build_form_render_model(
     field_specs_by_form: dict[str, list[Any]],
     *,
     form_labels: dict[str, str] | None = None,
+    event_labels: dict[str, str] | None = None,
     form_event_map: dict[str, list[str]] | None = None,
     title: str | None = None,
 ) -> FormRenderModel:
     form_labels = form_labels or {}
+    event_labels = event_labels or {}
     form_event_map = normalize_form_event_map(form_event_map)
     contexts_by_form = form_contexts_by_form(detail.field_values, field_specs_by_form, form_event_map)
     sections: list[FormSectionModel] = []
@@ -110,9 +113,10 @@ def build_form_render_model(
         sections.append(
             FormSectionModel(
                 form_name=form_name,
-                title=section_title(form_labels.get(form_name) or form_name, event_id=event_id, instance=instance),
+                title=form_labels.get(form_name) or form_name,
                 fields=fields,
                 event_id=event_id,
+                event_label=event_display_label(event_id, event_labels=event_labels, instance=instance),
                 instance=instance,
                 context_key=section_context_key(form_name, event_id, instance),
             )
@@ -323,15 +327,13 @@ def section_context_key(form_name: str, event_id: str = "", instance: str = "") 
     return field_context_key(form_name, event_id, instance)
 
 
-def section_title(base_title: str, *, event_id: str = "", instance: str = "") -> str:
+def event_display_label(event_id: str, *, event_labels: dict[str, str], instance: str = "") -> str:
     context_parts: list[str] = []
     if event_id:
-        context_parts.append(humanize_event_name(event_id))
+        context_parts.append(event_labels.get(event_id) or humanize_event_name(event_id))
     if instance:
         context_parts.append(f"Tekrar {instance}")
-    if not context_parts:
-        return base_title
-    return f"{' / '.join(context_parts)} - {base_title}"
+    return " / ".join(context_parts)
 
 
 def humanize_event_name(event_id: str) -> str:

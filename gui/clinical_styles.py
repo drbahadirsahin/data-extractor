@@ -66,6 +66,12 @@ QLabel#SectionTitle {
     font-weight: 720;
 }
 
+QLabel#SectionEventTitle {
+    color: #0f766e;
+    font-size: 12px;
+    font-weight: 760;
+}
+
 QLabel#SectionLabel {
     color: #18202a;
     font-size: 15px;
@@ -261,6 +267,29 @@ QLineEdit, QComboBox, QDateEdit {
 
 QLineEdit:focus, QComboBox:focus, QDateEdit:focus {
     border: 1px solid #0f766e;
+}
+
+QFrame#DataEntryDateEdit {
+    background: transparent;
+    border: none;
+}
+
+QLineEdit#DataEntryDateLineEdit {
+    min-height: 22px;
+}
+
+QToolButton#DataEntryDateButton {
+    background: #edf8f4;
+    color: #0f766e;
+    border: 1px solid #b7ded5;
+    border-radius: 7px;
+    padding: 9px 10px;
+    min-width: 34px;
+    min-height: 22px;
+}
+
+QToolButton#DataEntryDateButton:hover {
+    background: #dff4ee;
 }
 
 QComboBox#SidebarProjectCombo {

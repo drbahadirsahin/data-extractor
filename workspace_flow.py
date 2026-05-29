@@ -107,6 +107,10 @@ def ensure_project_config(
     except Exception:
         form_labels = {}
     try:
+        event_labels = client.export_event_labels()
+    except Exception:
+        event_labels = {}
+    try:
         repeating_forms = client.export_repeating_forms()
     except Exception:
         repeating_forms = []
@@ -126,6 +130,7 @@ def ensure_project_config(
     if default_llm_settings:
         blank_config["llm"] = dict(default_llm_settings)
     blank_config["form_labels"] = dict(form_labels)
+    blank_config["event_labels"] = dict(event_labels)
     blank_config["repeating_forms"] = list(repeating_forms)
     blank_config["repeating_events"] = list(repeating_events)
     blank_config["form_event_map"] = dict(form_event_map)
@@ -400,10 +405,17 @@ def ensure_server_metadata_in_config(config_path: Path, *, api_url: str, api_tok
         for form_name, label in config.form_labels.items()
         )
     )
+    needs_event_labels = not bool(config.event_labels)
     needs_repeating_forms = not bool(config.repeating_forms)
     needs_repeating_events = not bool(config.repeating_events)
     needs_form_event_map = not bool(config.form_event_map)
-    if not needs_form_labels and not needs_repeating_forms and not needs_repeating_events and not needs_form_event_map:
+    if (
+        not needs_form_labels
+        and not needs_event_labels
+        and not needs_repeating_forms
+        and not needs_repeating_events
+        and not needs_form_event_map
+    ):
         return
 
     client = RedcapClient(api_url=api_url, api_token=api_token)
@@ -416,6 +428,15 @@ def ensure_server_metadata_in_config(config_path: Path, *, api_url: str, api_tok
             form_labels = {}
         if form_labels:
             config.form_labels = dict(form_labels)
+            changed = True
+
+    if needs_event_labels:
+        try:
+            event_labels = client.export_event_labels()
+        except Exception:
+            event_labels = {}
+        if event_labels:
+            config.event_labels = dict(event_labels)
             changed = True
 
     if needs_repeating_forms:

@@ -163,6 +163,9 @@ class RedcapClient:
             raise RedcapAPIError(extract_xml_error_message(stripped))
         return parse_json_or_csv_list(stripped)
 
+    def export_event_labels(self) -> dict[str, str]:
+        return event_labels_from_event_rows(self.export_events())
+
     def export_form_event_mapping(self) -> dict[str, list[str]]:
         payload = {
             "token": self.api_token,
@@ -640,6 +643,30 @@ def parse_form_event_mapping_response(response: str) -> dict[str, list[str]]:
         if event_key not in bucket:
             bucket.append(event_key)
     return mapping
+
+
+def event_labels_from_event_rows(rows: list[dict[str, Any]]) -> dict[str, str]:
+    labels: dict[str, str] = {}
+    for row in rows:
+        unique_event_name = (
+            row.get("unique_event_name")
+            or row.get("event_name_unique")
+            or row.get("event")
+            or row.get("event_id")
+        )
+        event_key = str(unique_event_name or "").strip()
+        if not event_key:
+            continue
+        label = (
+            row.get("custom_event_label")
+            or row.get("event_label")
+            or row.get("event_name")
+            or row.get("descrip")
+            or event_key
+        )
+        label_text = str(label or "").strip()
+        labels[event_key] = label_text or event_key
+    return labels
 
 
 def infer_user_context(users: list[dict[str, Any]], username_hint: str | None = None) -> RedcapUserContext:

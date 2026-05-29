@@ -112,10 +112,13 @@ class DataEntryFormModelTests(unittest.TestCase):
         model = build_form_render_model(
             detail,
             fields,
+            event_labels={"baseline_arm_1": "Başlangıç", "followup_arm_1": "İzlem"},
             form_event_map={"hasta_bilgileri": ["baseline_arm_1", "followup_arm_1"]},
         )
 
         self.assertEqual([section.event_id for section in model.sections], ["baseline_arm_1", "followup_arm_1"])
+        self.assertEqual([section.event_label for section in model.sections], ["Başlangıç", "İzlem"])
+        self.assertEqual([section.title for section in model.sections], ["hasta_bilgileri", "hasta_bilgileri"])
         self.assertEqual([section.fields[0].event_id for section in model.sections], ["baseline_arm_1", "followup_arm_1"])
 
     def test_maps_readonly_and_descriptive_fields(self) -> None:

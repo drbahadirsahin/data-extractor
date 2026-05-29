@@ -4,6 +4,9 @@
   "dictionary_path": "",
   "target_forms": [],
   "target_fields": [],
+  "form_labels": {},
+  "event_labels": {},
+  "form_event_map": {},
   "llm": {
     "provider": "llm_gateway",
     "base_url": "https://llm-extractor-gateway.drbahadirsahin.workers.dev/v1",

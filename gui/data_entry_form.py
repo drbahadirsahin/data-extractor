@@ -35,6 +35,7 @@ class DataEntryFormWidget:
         self.field_state_labels: dict[str, Any] = {}
         self.form_nav: Any | None = None
         self.form_stack: Any | None = None
+        self._nav_section_role: Any | None = None
         self.model: FormRenderModel | None = None
         if model is not None:
             self.set_model(model)
@@ -50,6 +51,7 @@ class DataEntryFormWidget:
         self.field_state_labels = {}
         self.form_nav = None
         self.form_stack = None
+        self._nav_section_role = None
         self.model = model
 
         header = QLabel(model.title)
@@ -73,17 +75,30 @@ class DataEntryFormWidget:
 
             form_stack = QStackedWidget()
             form_stack.setObjectName("DataEntryFormStack")
-            for section in model.sections:
-                item = QListWidgetItem(nav_title_for_section(section))
-                item.setToolTip(str(section.title))
+            section_role = Qt.ItemDataRole.UserRole
+            self._nav_section_role = section_role
+            previous_event_key = object()
+            has_event_groups = any(str(getattr(section, "event_label", "") or "") for section in model.sections)
+            for section_index, section in enumerate(model.sections):
+                event_key = (getattr(section, "event_id", ""), getattr(section, "instance", ""))
+                if has_event_groups and event_key != previous_event_key:
+                    event_item = QListWidgetItem(section.event_label or tr("data_entry_event_unspecified", self.language))
+                    event_item.setFlags(Qt.ItemFlag.NoItemFlags)
+                    event_item.setData(section_role, -1)
+                    event_item.setSizeHint(QSize(260, 34))
+                    form_nav.addItem(event_item)
+                    previous_event_key = event_key
+                item = QListWidgetItem(nav_title_for_section(section, include_event=not has_event_groups))
+                item.setToolTip(section_tooltip(section))
+                item.setData(section_role, section_index)
                 item.setSizeHint(QSize(260, 56 if section_filled_count(section) else 46))
                 form_nav.addItem(item)
                 form_stack.addWidget(self.build_section_scroll(section, show_title=True))
-            form_nav.currentRowChanged.connect(form_stack.setCurrentIndex)
+            form_nav.currentRowChanged.connect(lambda row: self.handle_nav_row_changed(row))
             first_index = first_section_with_values(model.sections)
-            form_nav.setCurrentRow(first_index)
             self.form_nav = form_nav
             self.form_stack = form_stack
+            select_nav_row_for_section(form_nav, first_index, section_role)
             shell_layout.addWidget(form_nav, 0)
             shell_layout.addWidget(form_stack, 1)
             self.layout.addWidget(shell, 1)
@@ -111,6 +126,17 @@ class DataEntryFormWidget:
         scroll.setWidget(container)
         return scroll
 
+    def handle_nav_row_changed(self, row: int) -> None:
+        if self.form_nav is None or self.form_stack is None or self._nav_section_role is None:
+            return
+        item = self.form_nav.item(row)
+        if item is None:
+            return
+        section_index = item.data(self._nav_section_role)
+        if section_index is None or int(section_index) < 0:
+            return
+        self.form_stack.setCurrentIndex(int(section_index))
+
     def build_section_widget(self, section: Any, *, show_title: bool = True) -> Any:
         from PySide6.QtWidgets import QFrame, QGridLayout, QLabel, QLayout, QSizePolicy, QVBoxLayout
 
@@ -122,6 +148,11 @@ class DataEntryFormWidget:
         layout.setSpacing(10)
         layout.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
         if show_title:
+            if getattr(section, "event_label", ""):
+                event_title = QLabel(section.event_label)
+                event_title.setObjectName("SectionEventTitle")
+                event_title.setWordWrap(True)
+                layout.addWidget(event_title)
             title = QLabel(section.title)
             title.setObjectName("SectionTitle")
             title.setWordWrap(True)
@@ -234,25 +265,62 @@ class DataEntryFormWidget:
 
     def build_date_edit(self, field: FormFieldModel) -> Any:
         from PySide6.QtCore import QDate
-        from PySide6.QtWidgets import QDateEdit, QSizePolicy
+        from PySide6.QtWidgets import (
+            QCalendarWidget,
+            QFrame,
+            QHBoxLayout,
+            QLineEdit,
+            QMenu,
+            QSizePolicy,
+            QToolButton,
+            QWidgetAction,
+        )
 
         field_key = field_widget_key(field)
-        editor = QDateEdit()
-        editor.setObjectName("DataEntryDateEdit")
-        editor.setProperty("field_name", field.field_name)
-        editor.setProperty("field_key", field_key)
-        editor.setCalendarPopup(True)
-        editor.setDisplayFormat("yyyy-MM-dd")
-        editor.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        minimum_date = QDate(1900, 1, 1)
-        editor.setMinimumDate(minimum_date)
-        editor.setSpecialValueText("")
-        parsed = QDate.fromString(field.value_text, "yyyy-MM-dd")
-        editor.setDate(parsed if parsed.isValid() else minimum_date)
-        editor.setEnabled(not field.read_only)
-        editor.dateChanged.connect(lambda _date=None, key=field_key: self.handle_field_changed(key))
-        self.editor_widgets[field_key] = editor
-        return editor
+        frame = QFrame()
+        frame.setObjectName("DataEntryDateEdit")
+        frame.setProperty("field_name", field.field_name)
+        frame.setProperty("field_key", field_key)
+        frame.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        layout = QHBoxLayout(frame)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(6)
+
+        line_edit = QLineEdit(normalize_redcap_date_text(field.value_text))
+        line_edit.setObjectName("DataEntryDateLineEdit")
+        line_edit.setPlaceholderText("YYYY-MM-DD")
+        line_edit.setReadOnly(field.read_only)
+        line_edit.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+
+        button = QToolButton()
+        button.setObjectName("DataEntryDateButton")
+        button.setText("...")
+        button.setToolTip(tr("data_entry_date_picker_tooltip", self.language))
+        button.setEnabled(not field.read_only)
+
+        menu = QMenu(button)
+        calendar = QCalendarWidget()
+        calendar.setGridVisible(True)
+        parsed = parse_redcap_date_text(line_edit.text())
+        if parsed.isValid():
+            calendar.setSelectedDate(parsed)
+        action = QWidgetAction(menu)
+        action.setDefaultWidget(calendar)
+        menu.addAction(action)
+
+        def choose_date(date: QDate) -> None:
+            line_edit.setText(date.toString("yyyy-MM-dd"))
+            menu.hide()
+
+        calendar.clicked.connect(choose_date)
+        button.clicked.connect(lambda _checked=False: menu.exec(button.mapToGlobal(button.rect().bottomLeft())))
+        line_edit.textChanged.connect(lambda _text=None, key=field_key: self.handle_field_changed(key))
+        frame._data_entry_date_line_edit = line_edit
+        frame._data_entry_date_calendar = calendar
+        layout.addWidget(line_edit, 1)
+        layout.addWidget(button, 0)
+        self.editor_widgets[field_key] = frame
+        return frame
 
     def build_text_area(self, field: FormFieldModel) -> Any:
         from PySide6.QtWidgets import QPlainTextEdit
@@ -390,10 +458,21 @@ class DataEntryFormWidget:
             return None
         if self.form_nav is None:
             return self.model.sections[0]
-        index = self.form_nav.currentRow()
+        index = self.current_section_index()
         if index < 0 or index >= len(self.model.sections):
             return None
         return self.model.sections[index]
+
+    def current_section_index(self) -> int:
+        if self.form_nav is None or self._nav_section_role is None:
+            return 0
+        item = self.form_nav.currentItem()
+        if item is None:
+            return -1
+        section_index = item.data(self._nav_section_role)
+        if section_index is None:
+            return -1
+        return int(section_index)
 
     def apply_values(self, values: dict[str, Any], *, field_names: set[str] | None = None) -> int:
         applied = 0
@@ -418,10 +497,7 @@ class DataEntryFormWidget:
             widget.setPlainText(str(value or ""))
             return True
         if field.editor == DATE_EDITOR:
-            from PySide6.QtCore import QDate
-
-            parsed = QDate.fromString(str(value or ""), "yyyy-MM-dd")
-            widget.setDate(parsed if parsed.isValid() else widget.minimumDate())
+            set_date_picker_value(widget, value)
             return True
         if field.editor == TEXT_EDITOR:
             widget.setText(str(value or ""))
@@ -533,10 +609,49 @@ def field_widget_key(field: FormFieldModel) -> str:
 
 
 def date_edit_value(editor: Any) -> str:
-    date = editor.date()
-    if date == editor.minimumDate():
+    line_edit = getattr(editor, "_data_entry_date_line_edit", None)
+    if line_edit is None:
         return ""
-    return date.toString("yyyy-MM-dd")
+    return normalize_redcap_date_text(line_edit.text())
+
+
+def set_date_picker_value(editor: Any, value: Any) -> None:
+    normalized = normalize_redcap_date_text(value)
+    line_edit = getattr(editor, "_data_entry_date_line_edit", None)
+    if line_edit is not None:
+        line_edit.setText(normalized)
+    calendar = getattr(editor, "_data_entry_date_calendar", None)
+    parsed = parse_redcap_date_text(normalized)
+    if calendar is not None and parsed.isValid():
+        calendar.setSelectedDate(parsed)
+
+
+def normalize_redcap_date_text(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    parsed = parse_redcap_date_text(text)
+    if parsed.isValid():
+        return parsed.toString("yyyy-MM-dd")
+    return text
+
+
+def parse_redcap_date_text(value: Any) -> Any:
+    from PySide6.QtCore import QDate
+
+    text = str(value or "").strip()
+    if not text:
+        return QDate()
+    iso_match = re.search(r"\b(\d{4})-(\d{1,2})-(\d{1,2})\b", text)
+    if iso_match:
+        return QDate(int(iso_match.group(1)), int(iso_match.group(2)), int(iso_match.group(3)))
+    slash_match = re.fullmatch(r"(\d{4})/(\d{1,2})/(\d{1,2})", text)
+    if slash_match:
+        return QDate(int(slash_match.group(1)), int(slash_match.group(2)), int(slash_match.group(3)))
+    european_match = re.fullmatch(r"(\d{1,2})[./](\d{1,2})[./](\d{4})", text)
+    if european_match:
+        return QDate(int(european_match.group(3)), int(european_match.group(2)), int(european_match.group(1)))
+    return QDate()
 
 
 def field_uses_full_width(field: FormFieldModel) -> bool:
@@ -579,12 +694,30 @@ def repolish(widget: Any) -> None:
     style.polish(widget)
 
 
-def nav_title_for_section(section: Any) -> str:
+def nav_title_for_section(section: Any, *, include_event: bool = True) -> str:
     filled = section_filled_count(section)
     total = len(getattr(section, "fields", []) or [])
+    title = str(section.title)
+    if include_event and getattr(section, "event_label", ""):
+        title = f"{section.event_label} - {title}"
     if filled:
-        return f"{section.title}\n{filled}/{total} alan dolu"
+        return f"{title}\n{filled}/{total} alan dolu"
+    return title
+
+
+def section_tooltip(section: Any) -> str:
+    if getattr(section, "event_label", ""):
+        return f"{section.event_label}\n{section.title}"
     return str(section.title)
+
+
+def select_nav_row_for_section(form_nav: Any, section_index: int, role: Any) -> None:
+    for row in range(form_nav.count()):
+        item = form_nav.item(row)
+        if item is not None and item.data(role) == section_index:
+            form_nav.setCurrentRow(row)
+            return
+    form_nav.setCurrentRow(0)
 
 
 def first_section_with_values(sections: list[Any]) -> int:

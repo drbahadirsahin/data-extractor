@@ -207,6 +207,51 @@ class GuiDataEntryFormTests(unittest.TestCase):
         self.assertEqual(form_nav.currentRow(), 1)
         self.assertEqual(form.current_section().form_name, "b")
 
+    def test_event_sections_are_grouped_under_event_headers(self) -> None:
+        get_qapplication()
+        form = DataEntryFormWidget(
+            FormRenderModel(
+                project_id="17",
+                record="1",
+                title="Record 1",
+                sections=[
+                    FormSectionModel(
+                        form_name="a",
+                        title="Hasta Bilgileri",
+                        event_id="baseline_arm_1",
+                        event_label="Başlangıç",
+                        fields=[FormFieldModel("a1", "a", "A1", "text")],
+                    ),
+                    FormSectionModel(
+                        form_name="b",
+                        title="Laboratuvar",
+                        event_id="baseline_arm_1",
+                        event_label="Başlangıç",
+                        fields=[FormFieldModel("b1", "b", "B1", "text")],
+                    ),
+                    FormSectionModel(
+                        form_name="a",
+                        title="Hasta Bilgileri",
+                        event_id="followup_arm_1",
+                        event_label="İzlem",
+                        fields=[FormFieldModel("a1", "a", "A1", "text", value="filled")],
+                    ),
+                ],
+            )
+        )
+        from PySide6.QtWidgets import QListWidget
+
+        form_nav = form.widget.findChild(QListWidget, "DataEntryFormNav")
+
+        self.assertEqual([form_nav.item(index).text() for index in range(form_nav.count())], [
+            "Başlangıç",
+            "Hasta Bilgileri",
+            "Laboratuvar",
+            "İzlem",
+            "Hasta Bilgileri\n1/1 alan dolu",
+        ])
+        self.assertEqual(form.current_section().event_id, "followup_arm_1")
+
     def test_simple_branching_logic_hides_and_shows_fields(self) -> None:
         get_qapplication()
         form = DataEntryFormWidget(
@@ -266,6 +311,39 @@ class GuiDataEntryFormTests(unittest.TestCase):
         )
 
         self.assertEqual(form.collect_values()["dogum_tarihi"], "2026-05-28")
+
+    def test_date_editor_keeps_blank_blank_and_normalizes_common_date_formats(self) -> None:
+        get_qapplication()
+        form = DataEntryFormWidget(
+            FormRenderModel(
+                project_id="17",
+                record="1",
+                title="Record 1",
+                sections=[
+                    FormSectionModel(
+                        form_name="form",
+                        title="Form",
+                        fields=[
+                            FormFieldModel("blank_date", "form", "Boş tarih", DATE_EDITOR, value=""),
+                            FormFieldModel("dot_date", "form", "Noktalı tarih", DATE_EDITOR, value="16.01.2019"),
+                            FormFieldModel(
+                                "datetime_date",
+                                "form",
+                                "Saatli tarih",
+                                DATE_EDITOR,
+                                value="2026-05-28 10:20:00",
+                            ),
+                        ],
+                    )
+                ],
+            )
+        )
+
+        values = form.collect_values()
+
+        self.assertEqual(values["blank_date"], "")
+        self.assertEqual(values["dot_date"], "2019-01-16")
+        self.assertEqual(values["datetime_date"], "2026-05-28")
 
     def test_dynamic_sql_combo_keeps_existing_value_visible(self) -> None:
         get_qapplication()

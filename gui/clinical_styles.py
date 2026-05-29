@@ -278,20 +278,6 @@ QLineEdit#DataEntryDateLineEdit {
     min-height: 22px;
 }
 
-QToolButton#DataEntryDateButton {
-    background: #edf8f4;
-    color: #0f766e;
-    border: 1px solid #b7ded5;
-    border-radius: 7px;
-    padding: 9px 10px;
-    min-width: 34px;
-    min-height: 22px;
-}
-
-QToolButton#DataEntryDateButton:hover {
-    background: #dff4ee;
-}
-
 QComboBox#SidebarProjectCombo {
     background: #edf8f4;
     color: #0f766e;

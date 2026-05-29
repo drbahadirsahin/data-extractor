@@ -36,13 +36,23 @@ class DataEntryFormWidget:
         self.form_nav: Any | None = None
         self.form_stack: Any | None = None
         self._nav_section_role: Any | None = None
+        self._rendered_sections: set[int] = set()
         self.model: FormRenderModel | None = None
         if model is not None:
             self.set_model(model)
 
     def set_model(self, model: FormRenderModel) -> None:
         from PySide6.QtCore import QSize, Qt
-        from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QListWidget, QListWidgetItem, QStackedWidget
+        from PySide6.QtWidgets import (
+            QFrame,
+            QHBoxLayout,
+            QLabel,
+            QListWidget,
+            QListWidgetItem,
+            QStackedWidget,
+            QVBoxLayout,
+            QWidget,
+        )
 
         clear_layout(self.layout)
         self.editor_widgets = {}
@@ -52,6 +62,7 @@ class DataEntryFormWidget:
         self.form_nav = None
         self.form_stack = None
         self._nav_section_role = None
+        self._rendered_sections = set()
         self.model = model
 
         header = QLabel(model.title)
@@ -93,7 +104,12 @@ class DataEntryFormWidget:
                 item.setData(section_role, section_index)
                 item.setSizeHint(QSize(260, 56 if section_filled_count(section) else 46))
                 form_nav.addItem(item)
-                form_stack.addWidget(self.build_section_scroll(section, show_title=True))
+                placeholder = QWidget()
+                placeholder.setObjectName("DataEntrySectionPlaceholder")
+                placeholder_layout = QVBoxLayout(placeholder)
+                placeholder_layout.setContentsMargins(0, 0, 0, 0)
+                placeholder_layout.setSpacing(0)
+                form_stack.addWidget(placeholder)
             form_nav.currentRowChanged.connect(lambda row: self.handle_nav_row_changed(row))
             first_index = first_section_with_values(model.sections)
             self.form_nav = form_nav
@@ -135,7 +151,26 @@ class DataEntryFormWidget:
         section_index = item.data(self._nav_section_role)
         if section_index is None or int(section_index) < 0:
             return
-        self.form_stack.setCurrentIndex(int(section_index))
+        index = int(section_index)
+        self.render_section_at(index)
+        self.form_stack.setCurrentIndex(index)
+        self.update_branching_visibility()
+
+    def render_section_at(self, section_index: int) -> None:
+        if self.model is None or self.form_stack is None:
+            return
+        if section_index < 0 or section_index >= len(self.model.sections):
+            return
+        if section_index in self._rendered_sections:
+            return
+        placeholder = self.form_stack.widget(section_index)
+        if placeholder is None:
+            return
+        layout = placeholder.layout()
+        if layout is None:
+            return
+        layout.addWidget(self.build_section_scroll(self.model.sections[section_index], show_title=True))
+        self._rendered_sections.add(section_index)
 
     def build_section_widget(self, section: Any, *, show_title: bool = True) -> Any:
         from PySide6.QtWidgets import QFrame, QGridLayout, QLabel, QLayout, QSizePolicy, QVBoxLayout
@@ -264,7 +299,7 @@ class DataEntryFormWidget:
         return editor
 
     def build_date_edit(self, field: FormFieldModel) -> Any:
-        from PySide6.QtCore import QDate
+        from PySide6.QtCore import QDate, QEvent, QObject, QTimer
         from PySide6.QtWidgets import (
             QCalendarWidget,
             QFrame,
@@ -272,7 +307,6 @@ class DataEntryFormWidget:
             QLineEdit,
             QMenu,
             QSizePolicy,
-            QToolButton,
             QWidgetAction,
         )
 
@@ -292,13 +326,7 @@ class DataEntryFormWidget:
         line_edit.setReadOnly(field.read_only)
         line_edit.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
 
-        button = QToolButton()
-        button.setObjectName("DataEntryDateButton")
-        button.setText("...")
-        button.setToolTip(tr("data_entry_date_picker_tooltip", self.language))
-        button.setEnabled(not field.read_only)
-
-        menu = QMenu(button)
+        menu = QMenu(line_edit)
         calendar = QCalendarWidget()
         calendar.setGridVisible(True)
         parsed = parse_redcap_date_text(line_edit.text())
@@ -312,13 +340,29 @@ class DataEntryFormWidget:
             line_edit.setText(date.toString("yyyy-MM-dd"))
             menu.hide()
 
+        def show_calendar() -> None:
+            if line_edit.isReadOnly() or menu.isVisible():
+                return
+            current_date = parse_redcap_date_text(line_edit.text())
+            if current_date.isValid():
+                calendar.setSelectedDate(current_date)
+            menu.popup(line_edit.mapToGlobal(line_edit.rect().bottomLeft()))
+
+        class DatePopupFilter(QObject):
+            def eventFilter(self, watched: Any, event: Any) -> bool:
+                if event.type() in {QEvent.Type.FocusIn, QEvent.Type.MouseButtonPress}:
+                    QTimer.singleShot(0, show_calendar)
+                return False
+
         calendar.clicked.connect(choose_date)
-        button.clicked.connect(lambda _checked=False: menu.exec(button.mapToGlobal(button.rect().bottomLeft())))
         line_edit.textChanged.connect(lambda _text=None, key=field_key: self.handle_field_changed(key))
+        popup_filter = DatePopupFilter(line_edit)
+        line_edit.installEventFilter(popup_filter)
         frame._data_entry_date_line_edit = line_edit
         frame._data_entry_date_calendar = calendar
+        frame._data_entry_date_menu = menu
+        frame._data_entry_date_popup_filter = popup_filter
         layout.addWidget(line_edit, 1)
-        layout.addWidget(button, 0)
         self.editor_widgets[field_key] = frame
         return frame
 

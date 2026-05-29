@@ -206,6 +206,13 @@ class GuiDataEntryFormTests(unittest.TestCase):
         self.assertEqual(form_nav.item(1).text(), "Form B\n1/1 alan dolu")
         self.assertEqual(form_nav.currentRow(), 1)
         self.assertEqual(form.current_section().form_name, "b")
+        self.assertNotIn("a1", form.editor_widgets)
+        self.assertIn("b1", form.editor_widgets)
+
+        form_nav.setCurrentRow(0)
+
+        self.assertIn("a1", form.editor_widgets)
+        self.assertEqual(form.current_section().form_name, "a")
 
     def test_event_sections_are_grouped_under_event_headers(self) -> None:
         get_qapplication()
@@ -309,8 +316,10 @@ class GuiDataEntryFormTests(unittest.TestCase):
                 ],
             )
         )
+        from PySide6.QtWidgets import QToolButton
 
         self.assertEqual(form.collect_values()["dogum_tarihi"], "2026-05-28")
+        self.assertEqual(form.widget.findChildren(QToolButton, "DataEntryDateButton"), [])
 
     def test_date_editor_keeps_blank_blank_and_normalizes_common_date_formats(self) -> None:
         get_qapplication()
@@ -416,6 +425,7 @@ class GuiDataEntryFormTests(unittest.TestCase):
             )
         )
 
+        form.form_nav.setCurrentRow(1)
         values = form.collect_values()
 
         self.assertEqual(values["hasta_ad@@event=baseline_arm_1@@instance="], "AB")

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from typing import Any
+from typing import Any, Callable
 
 from data_entry_form_model import (
     CHECKBOX_EDITOR,
@@ -17,6 +17,7 @@ from data_entry_form_model import (
     FormRenderModel,
 )
 from gui.i18n import tr
+from redcap_calc import evaluate_redcap_calc
 
 
 class DataEntryFormWidget:
@@ -36,13 +37,22 @@ class DataEntryFormWidget:
         self.form_nav: Any | None = None
         self.form_stack: Any | None = None
         self.nav_buttons: dict[int, Any] = {}
+        self.repeat_actions: list[dict[str, Any]] = []
+        self.repeat_action_handler: Callable[[dict[str, Any]], None] | None = None
         self._current_section_index = 0
         self._rendered_sections: set[int] = set()
+        self._updating_calculations = False
         self.model: FormRenderModel | None = None
         if model is not None:
             self.set_model(model)
 
-    def set_model(self, model: FormRenderModel) -> None:
+    def set_model(
+        self,
+        model: FormRenderModel,
+        *,
+        repeat_actions: list[dict[str, Any]] | None = None,
+        repeat_action_handler: Callable[[dict[str, Any]], None] | None = None,
+    ) -> None:
         from PySide6.QtCore import Qt
         from PySide6.QtWidgets import (
             QFrame,
@@ -63,8 +73,11 @@ class DataEntryFormWidget:
         self.form_nav = None
         self.form_stack = None
         self.nav_buttons = {}
+        self.repeat_actions = list(repeat_actions or [])
+        self.repeat_action_handler = repeat_action_handler
         self._current_section_index = 0
         self._rendered_sections = set()
+        self._updating_calculations = False
         self.model = model
 
         header = QLabel(model.title)
@@ -92,6 +105,8 @@ class DataEntryFormWidget:
             nav_layout.setContentsMargins(8, 8, 8, 8)
             nav_layout.setSpacing(6)
             form_nav.setWidget(nav_body)
+            if self.repeat_actions:
+                nav_layout.addWidget(self.build_repeat_action_panel())
 
             form_stack = QStackedWidget()
             form_stack.setObjectName("DataEntryFormStack")
@@ -113,7 +128,11 @@ class DataEntryFormWidget:
                 button.setProperty("section_index", section_index)
                 button.setMinimumHeight(nav_button_height(button.text()))
                 button.clicked.connect(lambda _checked=False, index=section_index: self.select_section(index))
-                nav_layout.addWidget(button)
+                inline_action = self.repeat_action_for_section(section)
+                if inline_action is None:
+                    nav_layout.addWidget(button)
+                else:
+                    nav_layout.addWidget(self.build_nav_button_row(button, inline_action))
                 self.nav_buttons[section_index] = button
                 placeholder = QWidget()
                 placeholder.setObjectName("DataEntrySectionPlaceholder")
@@ -130,9 +149,63 @@ class DataEntryFormWidget:
             self.layout.addWidget(shell, 1)
             self.select_section(first_index)
         else:
+            if self.repeat_actions:
+                self.layout.addWidget(self.build_repeat_action_panel())
             for section in model.sections:
                 self.layout.addWidget(self.build_section_scroll(section), 1)
         self.update_branching_visibility()
+        self.update_calculated_fields()
+
+    def build_repeat_action_panel(self) -> Any:
+        from PySide6.QtWidgets import QFrame, QLabel, QPushButton, QVBoxLayout
+
+        panel = QFrame()
+        panel.setObjectName("DataEntryRepeatPanel")
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(6)
+        title = QLabel(tr("data_entry_repeat_panel_title", self.language))
+        title.setObjectName("DataEntryRepeatPanelTitle")
+        layout.addWidget(title)
+        for action in self.repeat_actions:
+            button = QPushButton(repeat_action_button_text(action))
+            button.setObjectName("DataEntryRepeatPanelButton")
+            button.setToolTip(str(action.get("label") or ""))
+            button.clicked.connect(lambda _checked=False, option=action: self.trigger_repeat_action(option))
+            layout.addWidget(button)
+        return panel
+
+    def build_nav_button_row(self, button: Any, action: dict[str, Any]) -> Any:
+        from PySide6.QtWidgets import QFrame, QHBoxLayout, QPushButton
+
+        row = QFrame()
+        row.setObjectName("DataEntryFormNavButtonRow")
+        layout = QHBoxLayout(row)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(6)
+        layout.addWidget(button, 1)
+        add_button = QPushButton("+")
+        add_button.setObjectName("DataEntryFormNavInlineAdd")
+        add_button.setToolTip(str(action.get("label") or tr("data_entry_add_repeat", self.language)))
+        add_button.setFixedWidth(34)
+        add_button.clicked.connect(lambda _checked=False, option=action: self.trigger_repeat_action(option))
+        layout.addWidget(add_button, 0)
+        return row
+
+    def repeat_action_for_section(self, section: Any) -> dict[str, Any] | None:
+        for action in self.repeat_actions:
+            if str(action.get("kind") or "") != "form":
+                continue
+            if str(action.get("form_name") or "") != str(getattr(section, "form_name", "") or ""):
+                continue
+            if str(action.get("event_id") or "") != str(getattr(section, "event_id", "") or ""):
+                continue
+            return action
+        return None
+
+    def trigger_repeat_action(self, option: dict[str, Any]) -> None:
+        if self.repeat_action_handler is not None:
+            self.repeat_action_handler(option)
 
     def build_section_scroll(self, section: Any, *, show_title: bool = True) -> Any:
         from PySide6.QtCore import Qt
@@ -165,6 +238,7 @@ class DataEntryFormWidget:
             button.setChecked(index == section_index)
             button.setProperty("active", index == section_index)
             repolish(button)
+        self.update_calculated_fields()
         self.update_branching_visibility()
 
     def render_section_at(self, section_index: int) -> None:
@@ -469,6 +543,10 @@ class DataEntryFormWidget:
         value = field.value_text or "-"
         label = QLabel(value)
         label.setObjectName("DataEntryReadonlyValue")
+        label.setProperty("field_name", field.field_name)
+        label.setProperty("field_key", field_key)
+        if field.field_type == "calc":
+            label.setProperty("calculated", True)
         label.setWordWrap(True)
         self.editor_widgets[field_key] = label
         return label
@@ -586,7 +664,29 @@ class DataEntryFormWidget:
 
     def handle_field_changed(self, field_key: str) -> None:
         self.update_field_row_state(field_key)
+        self.update_calculated_fields()
         self.update_branching_visibility()
+
+    def update_calculated_fields(self) -> None:
+        if self.model is None or self._updating_calculations:
+            return
+        self._updating_calculations = True
+        try:
+            for field in self.model.fields:
+                if field.field_type != "calc" or not field.calc_expression:
+                    continue
+                field_key = field_widget_key(field)
+                widget = self.editor_widgets.get(field_key)
+                if widget is None or not hasattr(widget, "setText"):
+                    continue
+                calculated = evaluate_redcap_calc(
+                    field.calc_expression,
+                    self.values_for_context(field, include_calculated=False),
+                )
+                widget.setText(calculated or "-")
+                self.update_field_row_state(field_key)
+        finally:
+            self._updating_calculations = False
 
     def refresh_field_states(self) -> None:
         for field_name in list(self.field_rows):
@@ -609,6 +709,11 @@ class DataEntryFormWidget:
         widget = self.editor_widgets.get(field_widget_key(field))
         if widget is None:
             return field.value
+        if field.editor == READONLY_EDITOR:
+            if hasattr(widget, "text"):
+                text = str(widget.text() or "")
+                return "" if text == "-" else text
+            return field.value
         if field.editor == TEXT_AREA_EDITOR:
             return widget.toPlainText()
         if field.editor == DATE_EDITOR:
@@ -629,6 +734,9 @@ class DataEntryFormWidget:
         return field.value
 
     def branching_values_for_context(self, target_field: FormFieldModel) -> dict[str, Any]:
+        return self.values_for_context(target_field, include_calculated=True)
+
+    def values_for_context(self, target_field: FormFieldModel, *, include_calculated: bool) -> dict[str, Any]:
         values: dict[str, Any] = {}
         for field in self.model.fields if self.model is not None else []:
             if (
@@ -636,6 +744,8 @@ class DataEntryFormWidget:
                 or field.repeat_instrument != target_field.repeat_instrument
                 or field.instance != target_field.instance
             ):
+                continue
+            if not include_calculated and field.field_type == "calc":
                 continue
             value = self.current_field_value(field)
             if field.editor == CHECKBOX_EDITOR:
@@ -793,6 +903,13 @@ def section_display_title(section: Any) -> str:
     if getattr(section, "repeat_instrument", "") and getattr(section, "instance", ""):
         return f"{title} #{section.instance}"
     return title
+
+
+def repeat_action_button_text(action: dict[str, Any]) -> str:
+    button_label = str(action.get("button_label") or "").strip()
+    if button_label:
+        return button_label
+    return str(action.get("label") or "").strip()
 
 
 def first_section_with_values(sections: list[Any]) -> int:

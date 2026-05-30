@@ -297,6 +297,96 @@ class GuiDataEntryFormTests(unittest.TestCase):
         self.assertEqual(nav_buttons[1].text(), "Tanı Laboratuvar Sonucu #2\n1/1 alan dolu")
         self.assertNotIn("Tekrar", nav_buttons[0].text())
 
+    def test_repeat_actions_are_contextual_in_the_form_navigation(self) -> None:
+        get_qapplication()
+        triggered = []
+        form = DataEntryFormWidget(language="tr")
+        form.set_model(
+            FormRenderModel(
+                project_id="17",
+                record="1",
+                title="Record 1",
+                sections=[
+                    FormSectionModel(
+                        form_name="tan_laboratuvar_sonucu",
+                        title="Tanı Laboratuvar Sonucu",
+                        event_id="baseline_arm_1",
+                        event_label="Başlangıç",
+                        repeat_instrument="tan_laboratuvar_sonucu",
+                        instance="1",
+                        fields=[FormFieldModel("psa", "tan_laboratuvar_sonucu", "PSA", "text", "4.2")],
+                    ),
+                    FormSectionModel(
+                        form_name="hasta_bilgileri",
+                        title="Hasta Bilgileri",
+                        event_id="followup_arm_1",
+                        event_label="İzlem",
+                        fields=[FormFieldModel("hasta_ad", "hasta_bilgileri", "Hasta adı", "text")],
+                    ),
+                ],
+            ),
+            repeat_actions=[
+                {
+                    "kind": "event",
+                    "event_id": "followup_arm_1",
+                    "label": "Event: İzlem #2",
+                    "button_label": "+ İzlem",
+                },
+                {
+                    "kind": "form",
+                    "form_name": "tan_laboratuvar_sonucu",
+                    "event_id": "baseline_arm_1",
+                    "label": "Form: Başlangıç / Tanı Laboratuvar Sonucu #2",
+                    "button_label": "+ Tanı Laboratuvar Sonucu",
+                },
+            ],
+            repeat_action_handler=lambda option: triggered.append(option),
+        )
+        from PySide6.QtWidgets import QPushButton
+
+        panel_buttons = form.widget.findChildren(QPushButton, "DataEntryRepeatPanelButton")
+        inline_buttons = form.widget.findChildren(QPushButton, "DataEntryFormNavInlineAdd")
+
+        self.assertEqual([button.text() for button in panel_buttons], ["+ İzlem", "+ Tanı Laboratuvar Sonucu"])
+        self.assertEqual(len(inline_buttons), 1)
+        inline_buttons[0].click()
+        self.assertEqual(triggered[0]["kind"], "form")
+
+    def test_calculated_fields_update_from_visible_form_values(self) -> None:
+        get_qapplication()
+        form = DataEntryFormWidget(
+            FormRenderModel(
+                project_id="17",
+                record="1",
+                title="Record 1",
+                sections=[
+                    FormSectionModel(
+                        form_name="hasta_bilgileri",
+                        title="Hasta Bilgileri",
+                        fields=[
+                            FormFieldModel("hasta_kilo", "hasta_bilgileri", "Kilo", "text", "82"),
+                            FormFieldModel("hasta_boy", "hasta_bilgileri", "Boy", "text", "180"),
+                            FormFieldModel(
+                                "hasta_vki",
+                                "hasta_bilgileri",
+                                "VKİ",
+                                "readonly",
+                                field_type="calc",
+                                read_only=True,
+                                calc_expression="round(([hasta_kilo]*10000)/([hasta_boy]*[hasta_boy]),2)",
+                            ),
+                        ],
+                    )
+                ],
+            )
+        )
+
+        self.assertEqual(form.editor_widgets["hasta_vki"].text(), "25.31")
+
+        form.editor_widgets["hasta_kilo"].setText("90")
+
+        self.assertEqual(form.editor_widgets["hasta_vki"].text(), "27.78")
+
     def test_simple_branching_logic_hides_and_shows_fields(self) -> None:
         get_qapplication()
         form = DataEntryFormWidget(

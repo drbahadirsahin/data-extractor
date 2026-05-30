@@ -351,24 +351,6 @@ QListWidget#DataEntryRecordList::item:selected {
     color: #0f766e;
 }
 
-QListWidget#DataEntryRepeatOptionList {
-    background: #ffffff;
-    border: 1px solid #ded8cd;
-    border-radius: 8px;
-    padding: 8px;
-}
-
-QListWidget#DataEntryRepeatOptionList::item {
-    padding: 10px 12px;
-    border-radius: 7px;
-    font-weight: 650;
-}
-
-QListWidget#DataEntryRepeatOptionList::item:selected {
-    background: #102027;
-    color: #ffffff;
-}
-
 QWidget#DataEntryForm {
     background: transparent;
 }
@@ -419,6 +401,53 @@ QPushButton#DataEntryFormNavButton[active="true"] {
     background: #102027;
     color: #ffffff;
     border: 1px solid #102027;
+}
+
+QFrame#DataEntryRepeatPanel {
+    background: #f8fafc;
+    border: 1px solid #dbe3ea;
+    border-radius: 8px;
+    padding: 4px;
+    margin-bottom: 6px;
+}
+
+QLabel#DataEntryRepeatPanelTitle {
+    color: #536273;
+    font-size: 11px;
+    font-weight: 780;
+}
+
+QPushButton#DataEntryRepeatPanelButton {
+    background: #ffffff;
+    color: #0f766e;
+    border: 1px solid #c9e9df;
+    border-radius: 7px;
+    padding: 7px 9px;
+    text-align: left;
+    font-weight: 720;
+}
+
+QPushButton#DataEntryRepeatPanelButton:hover {
+    background: #edf8f4;
+    border: 1px solid #9ed8cc;
+}
+
+QFrame#DataEntryFormNavButtonRow {
+    background: transparent;
+}
+
+QPushButton#DataEntryFormNavInlineAdd {
+    background: #edf8f4;
+    color: #0f766e;
+    border: 1px solid #b7ded5;
+    border-radius: 7px;
+    font-size: 16px;
+    font-weight: 820;
+}
+
+QPushButton#DataEntryFormNavInlineAdd:hover {
+    background: #dff4ee;
+    border: 1px solid #8fcfc2;
 }
 
 QStackedWidget#DataEntryFormStack {
@@ -507,6 +536,13 @@ QLabel#DataEntryReadonlyValue {
     border: 1px solid #e0ded7;
     border-radius: 7px;
     padding: 9px 10px;
+}
+
+QLabel#DataEntryReadonlyValue[calculated="true"] {
+    background: #eefaf6;
+    color: #0f766e;
+    border: 1px solid #b7ded5;
+    font-weight: 760;
 }
 
 QFrame#DataEntryChoiceGroup {

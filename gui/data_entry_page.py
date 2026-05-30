@@ -205,10 +205,6 @@ class ClinicalDataEntryPage:
         self.ai_fill_button.setProperty("secondary", True)
         self.ai_fill_button.clicked.connect(self.fill_current_form_with_ai)
         self.ai_fill_button.setEnabled(False)
-        self.add_repeat_button = QPushButton(tr("data_entry_add_repeat", self.language))
-        self.add_repeat_button.setProperty("secondary", True)
-        self.add_repeat_button.clicked.connect(self.add_repeat_context)
-        self.add_repeat_button.setEnabled(False)
         self.save_button = QPushButton(tr("data_entry_save_local", self.language))
         self.save_button.setProperty("secondary", True)
         self.save_button.clicked.connect(lambda: self.save_current_record(send=False))
@@ -217,7 +213,6 @@ class ClinicalDataEntryPage:
         self.send_button.clicked.connect(lambda: self.save_current_record(send=True))
         self.send_button.setEnabled(False)
         action_row.addWidget(self.ai_fill_button)
-        action_row.addWidget(self.add_repeat_button)
         action_row.addStretch(1)
         action_row.addWidget(self.save_button)
         action_row.addWidget(self.send_button)
@@ -232,7 +227,6 @@ class ClinicalDataEntryPage:
     def set_form_actions_enabled(self, enabled: bool) -> None:
         enabled = bool(enabled)
         self.ai_fill_button.setEnabled(enabled and self._ai_thread is None)
-        self.add_repeat_button.setEnabled(enabled)
         self.save_button.setEnabled(enabled)
         self.send_button.setEnabled(enabled)
 
@@ -360,7 +354,11 @@ class ClinicalDataEntryPage:
             self.status_label.setText(tr("data_entry_record_open_failed", self.language, error=str(exc)))
             return
         self.current_model = model
-        self.form_widget.set_model(model)
+        self.form_widget.set_model(
+            model,
+            repeat_actions=repeat_context_options(model, self.bundle, self.language),
+            repeat_action_handler=self.add_repeat_context,
+        )
         self.set_form_actions_enabled(True)
         self.status_label.setText(tr("data_entry_record_opened", self.language, record=record))
 
@@ -426,7 +424,11 @@ class ClinicalDataEntryPage:
             additional_contexts_by_form=self.extra_repeat_contexts,
             title=tr("data_entry_record_title", self.language, record=record_id),
         )
-        self.form_widget.set_model(self.current_model)
+        self.form_widget.set_model(
+            self.current_model,
+            repeat_actions=repeat_context_options(self.current_model, self.bundle, self.language),
+            repeat_action_handler=self.add_repeat_context,
+        )
         self.record_list.clearSelection()
         self.set_form_actions_enabled(True)
         self.status_label.setText(
@@ -607,19 +609,18 @@ class ClinicalDataEntryPage:
         applied = self.form_widget.apply_values(values, field_names=field_names)
         self.status_label.setText(tr("data_entry_ai_fill_done", self.language, count=applied))
 
-    def add_repeat_context(self) -> None:
+    def add_repeat_context(self, option: dict[str, Any] | None = None) -> None:
         if self.current_model is None:
             return
         if self.bundle is None:
             self.status_label.setText(tr("data_entry_metadata_missing", self.language))
             return
-        options = repeat_context_options(self.current_model, self.bundle, self.language)
-        if not options:
-            self.status_label.setText(tr("data_entry_repeat_no_options", self.language))
-            return
-        option = prompt_repeat_context(self.widget, options, self.language)
         if option is None:
-            return
+            options = repeat_context_options(self.current_model, self.bundle, self.language)
+            if not options:
+                self.status_label.setText(tr("data_entry_repeat_no_options", self.language))
+                return
+            option = options[0]
         current_values = self.form_widget.collect_values(include_hidden=True)
         contexts = contexts_for_repeat_option(option, self.bundle)
         for form_name, context in contexts.items():
@@ -652,7 +653,11 @@ class ClinicalDataEntryPage:
             additional_contexts_by_form=self.extra_repeat_contexts,
             title=tr("data_entry_record_title", self.language, record=record),
         )
-        self.form_widget.set_model(self.current_model)
+        self.form_widget.set_model(
+            self.current_model,
+            repeat_actions=repeat_context_options(self.current_model, self.bundle, self.language),
+            repeat_action_handler=self.add_repeat_context,
+        )
         if preserve_values:
             render_sections_for_preserved_values(self.form_widget, self.current_model, preserve_values)
             self.form_widget.apply_values(preserve_values, field_names=set(preserve_values))
@@ -927,7 +932,9 @@ def repeat_context_options(model: Any, bundle: WorkspaceBundle, language: str) -
         options.append(
             {
                 "kind": "event",
+                "event_id": event_key,
                 "label": tr("data_entry_repeat_event_option", language, event=event_label, instance=instance),
+                "button_label": tr("data_entry_repeat_event_button", language, event=event_label),
                 "contexts_by_form": contexts,
                 "select_context": (event_forms[0], event_key, "", instance),
             }
@@ -945,6 +952,8 @@ def repeat_context_options(model: Any, bundle: WorkspaceBundle, language: str) -
             options.append(
                 {
                     "kind": "form",
+                    "form_name": form_name,
+                    "event_id": event_key,
                     "label": tr(
                         "data_entry_repeat_form_option",
                         language,
@@ -952,6 +961,7 @@ def repeat_context_options(model: Any, bundle: WorkspaceBundle, language: str) -
                         form=form_label,
                         instance=instance,
                     ),
+                    "button_label": tr("data_entry_repeat_form_button", language, form=form_label),
                     "contexts_by_form": {
                         form_name: (event_key, form_name, instance),
                     },
@@ -1011,50 +1021,6 @@ def contexts_for_repeat_option(option: dict[str, Any], bundle: WorkspaceBundle) 
             for form_name, context in contexts.items()
         }
     return {}
-
-
-def prompt_repeat_context(parent: Any, options: list[dict[str, Any]], language: str) -> dict[str, Any] | None:
-    from PySide6.QtWidgets import QDialog, QDialogButtonBox, QLabel, QListWidget, QListWidgetItem, QVBoxLayout
-
-    dialog = QDialog(parent)
-    dialog.setWindowTitle(tr("data_entry_repeat_dialog_title", language))
-    dialog.setMinimumSize(560, 420)
-    layout = QVBoxLayout(dialog)
-    layout.setContentsMargins(16, 16, 16, 16)
-    layout.setSpacing(10)
-    title = QLabel(tr("data_entry_repeat_dialog_title", language))
-    title.setObjectName("TitleLabel")
-    layout.addWidget(title)
-    body = QLabel(tr("data_entry_repeat_dialog_body", language))
-    body.setObjectName("MutedLabel")
-    body.setWordWrap(True)
-    layout.addWidget(body)
-    list_widget = QListWidget()
-    list_widget.setObjectName("DataEntryRepeatOptionList")
-    for index, option in enumerate(options):
-        item = QListWidgetItem(str(option.get("label") or ""))
-        item.setData(Qt.ItemDataRole.UserRole, index)
-        list_widget.addItem(item)
-    if options:
-        list_widget.setCurrentRow(0)
-    layout.addWidget(list_widget, 1)
-    buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
-    ok_button = buttons.button(QDialogButtonBox.StandardButton.Ok)
-    if ok_button is not None:
-        ok_button.setText(tr("data_entry_repeat_add_button", language))
-    cancel_button = buttons.button(QDialogButtonBox.StandardButton.Cancel)
-    if cancel_button is not None:
-        cancel_button.setText(tr("cancel_button", language))
-    buttons.accepted.connect(dialog.accept)
-    buttons.rejected.connect(dialog.reject)
-    layout.addWidget(buttons)
-    if dialog.exec() != QDialog.DialogCode.Accepted:
-        return None
-    item = list_widget.currentItem()
-    if item is None:
-        return None
-    index = int(item.data(Qt.ItemDataRole.UserRole))
-    return options[index]
 
 
 def prompt_ai_fill_options(

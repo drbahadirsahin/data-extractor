@@ -320,8 +320,25 @@ class DataEntryFormModelTests(unittest.TestCase):
 
         self.assertEqual(model.fields[0].editor, READONLY_EDITOR)
         self.assertTrue(model.fields[0].read_only)
+        self.assertIsNone(model.fields[0].calc_expression)
         self.assertEqual(model.fields[1].editor, DESCRIPTION_EDITOR)
         self.assertEqual(model.fields[1].value, "Read this text")
+
+    def test_preserves_calc_expression_for_live_form_calculation(self) -> None:
+        detail = RecordDetail(project_id="17", record="1")
+        fields = {
+            "form": [
+                FieldSpec("kilo", "form", "text", "Kilo"),
+                FieldSpec("boy", "form", "text", "Boy"),
+                FieldSpec("vki", "form", "calc", "VKİ", "round(([kilo]*10000)/([boy]*[boy]),2)"),
+            ]
+        }
+
+        model = build_form_render_model(detail, fields)
+        by_name = {field.field_name: field for field in model.fields}
+
+        self.assertEqual(by_name["vki"].editor, READONLY_EDITOR)
+        self.assertEqual(by_name["vki"].calc_expression, "round(([kilo]*10000)/([boy]*[boy]),2)")
 
     def test_maps_date_and_dynamic_sql_fields(self) -> None:
         detail = RecordDetail(project_id="17", record="1")

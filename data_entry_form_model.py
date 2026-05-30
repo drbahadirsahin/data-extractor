@@ -39,6 +39,7 @@ class FormFieldModel:
     validation_max: str | None = None
     required: bool = False
     branching_logic: str | None = None
+    calc_expression: str | None = None
     read_only: bool = False
     hidden: bool = False
     present: bool = True
@@ -214,6 +215,7 @@ def build_field_model(
         validation_max=metadata_optional_text(field_spec, "text_validation_max"),
         required=metadata_bool(field_spec, "required"),
         branching_logic=metadata_optional_text(field_spec, "branching_logic"),
+        calc_expression=metadata_optional_text(field_spec, "choices") if field_type == "calc" else None,
         read_only=read_only,
         hidden=hidden,
         present=present,

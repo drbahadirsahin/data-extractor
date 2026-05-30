@@ -43,13 +43,14 @@ class DataEntryFormWidget:
 
     def set_model(self, model: FormRenderModel) -> None:
         from PySide6.QtCore import QSize, Qt
+        from PySide6.QtGui import QBrush, QColor, QFont
         from PySide6.QtWidgets import (
             QFrame,
             QHBoxLayout,
             QLabel,
-            QListWidget,
-            QListWidgetItem,
             QStackedWidget,
+            QTreeWidget,
+            QTreeWidgetItem,
             QVBoxLayout,
             QWidget,
         )
@@ -76,41 +77,58 @@ class DataEntryFormWidget:
             shell_layout.setContentsMargins(0, 0, 0, 0)
             shell_layout.setSpacing(14)
 
-            form_nav = QListWidget()
+            form_nav = QTreeWidget()
             form_nav.setObjectName("DataEntryFormNav")
+            form_nav.setHeaderHidden(True)
             form_nav.setMinimumWidth(280)
             form_nav.setMaximumWidth(360)
             form_nav.setWordWrap(True)
-            form_nav.setUniformItemSizes(False)
             form_nav.setTextElideMode(Qt.TextElideMode.ElideNone)
+            form_nav.setRootIsDecorated(True)
+            form_nav.setIndentation(16)
+            form_nav.setItemsExpandable(False)
 
             form_stack = QStackedWidget()
             form_stack.setObjectName("DataEntryFormStack")
             section_role = Qt.ItemDataRole.UserRole
             self._nav_section_role = section_role
-            previous_event_key = object()
             has_event_groups = any(str(getattr(section, "event_label", "") or "") for section in model.sections)
+            event_items: dict[tuple[str, str], Any] = {}
             for section_index, section in enumerate(model.sections):
                 event_key = (getattr(section, "event_id", ""), getattr(section, "instance", ""))
-                if has_event_groups and event_key != previous_event_key:
-                    event_item = QListWidgetItem(section.event_label or tr("data_entry_event_unspecified", self.language))
-                    event_item.setFlags(Qt.ItemFlag.NoItemFlags)
-                    event_item.setData(section_role, -1)
-                    event_item.setSizeHint(QSize(260, 34))
-                    form_nav.addItem(event_item)
-                    previous_event_key = event_key
-                item = QListWidgetItem(nav_title_for_section(section, include_event=not has_event_groups))
-                item.setToolTip(section_tooltip(section))
-                item.setData(section_role, section_index)
-                item.setSizeHint(QSize(260, 56 if section_filled_count(section) else 46))
-                form_nav.addItem(item)
+                parent_item = None
+                if has_event_groups:
+                    parent_item = event_items.get(event_key)
+                    if parent_item is None:
+                        parent_item = QTreeWidgetItem([section.event_label or tr("data_entry_event_unspecified", self.language)])
+                        parent_item.setData(0, section_role, -1)
+                        parent_item.setFlags(Qt.ItemFlag.ItemIsEnabled)
+                        parent_item.setExpanded(True)
+                        parent_item.setFirstColumnSpanned(True)
+                        parent_item.setSizeHint(0, QSize(260, 32))
+                        event_font = QFont()
+                        event_font.setBold(True)
+                        parent_item.setFont(0, event_font)
+                        parent_item.setBackground(0, QBrush(QColor("#edf8f4")))
+                        parent_item.setForeground(0, QBrush(QColor("#0f766e")))
+                        form_nav.addTopLevelItem(parent_item)
+                        event_items[event_key] = parent_item
+                item = QTreeWidgetItem([nav_title_for_section(section, include_event=not has_event_groups)])
+                item.setToolTip(0, section_tooltip(section))
+                item.setData(0, section_role, section_index)
+                item.setSizeHint(0, QSize(260, 56 if section_filled_count(section) else 44))
+                if parent_item is not None:
+                    parent_item.addChild(item)
+                else:
+                    form_nav.addTopLevelItem(item)
                 placeholder = QWidget()
                 placeholder.setObjectName("DataEntrySectionPlaceholder")
                 placeholder_layout = QVBoxLayout(placeholder)
                 placeholder_layout.setContentsMargins(0, 0, 0, 0)
                 placeholder_layout.setSpacing(0)
                 form_stack.addWidget(placeholder)
-            form_nav.currentRowChanged.connect(lambda row: self.handle_nav_row_changed(row))
+            form_nav.currentItemChanged.connect(lambda current, previous=None: self.handle_nav_item_changed(current))
+            form_nav.expandAll()
             first_index = first_section_with_values(model.sections)
             self.form_nav = form_nav
             self.form_stack = form_stack
@@ -142,13 +160,12 @@ class DataEntryFormWidget:
         scroll.setWidget(container)
         return scroll
 
-    def handle_nav_row_changed(self, row: int) -> None:
+    def handle_nav_item_changed(self, item: Any) -> None:
         if self.form_nav is None or self.form_stack is None or self._nav_section_role is None:
             return
-        item = self.form_nav.item(row)
         if item is None:
             return
-        section_index = item.data(self._nav_section_role)
+        section_index = item.data(0, self._nav_section_role)
         if section_index is None or int(section_index) < 0:
             return
         index = int(section_index)
@@ -338,7 +355,7 @@ class DataEntryFormWidget:
 
         def choose_date(date: QDate) -> None:
             line_edit.setText(date.toString("yyyy-MM-dd"))
-            menu.hide()
+            menu.close()
 
         def show_calendar() -> None:
             if line_edit.isReadOnly() or menu.isVisible():
@@ -350,11 +367,12 @@ class DataEntryFormWidget:
 
         class DatePopupFilter(QObject):
             def eventFilter(self, watched: Any, event: Any) -> bool:
-                if event.type() in {QEvent.Type.FocusIn, QEvent.Type.MouseButtonPress}:
+                if event.type() == QEvent.Type.MouseButtonPress:
                     QTimer.singleShot(0, show_calendar)
                 return False
 
         calendar.clicked.connect(choose_date)
+        calendar.activated.connect(choose_date)
         line_edit.textChanged.connect(lambda _text=None, key=field_key: self.handle_field_changed(key))
         popup_filter = DatePopupFilter(line_edit)
         line_edit.installEventFilter(popup_filter)
@@ -513,7 +531,7 @@ class DataEntryFormWidget:
         item = self.form_nav.currentItem()
         if item is None:
             return -1
-        section_index = item.data(self._nav_section_role)
+        section_index = item.data(0, self._nav_section_role)
         if section_index is None:
             return -1
         return int(section_index)
@@ -756,12 +774,23 @@ def section_tooltip(section: Any) -> str:
 
 
 def select_nav_row_for_section(form_nav: Any, section_index: int, role: Any) -> None:
-    for row in range(form_nav.count()):
-        item = form_nav.item(row)
-        if item is not None and item.data(role) == section_index:
-            form_nav.setCurrentRow(row)
+    for item in iter_tree_items(form_nav):
+        if item is not None and item.data(0, role) == section_index:
+            form_nav.setCurrentItem(item)
             return
-    form_nav.setCurrentRow(0)
+    first_item = form_nav.topLevelItem(0)
+    if first_item is not None:
+        form_nav.setCurrentItem(first_item)
+
+
+def iter_tree_items(tree: Any) -> list[Any]:
+    items: list[Any] = []
+    for top_index in range(tree.topLevelItemCount()):
+        top_item = tree.topLevelItem(top_index)
+        items.append(top_item)
+        for child_index in range(top_item.childCount()):
+            items.append(top_item.child(child_index))
+    return items
 
 
 def first_section_with_values(sections: list[Any]) -> int:

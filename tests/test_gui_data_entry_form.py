@@ -193,23 +193,23 @@ class GuiDataEntryFormTests(unittest.TestCase):
                 ],
             )
         )
-        from PySide6.QtWidgets import QListWidget, QStackedWidget
+        from PySide6.QtWidgets import QStackedWidget, QTreeWidget
 
-        form_nav = form.widget.findChild(QListWidget, "DataEntryFormNav")
+        form_nav = form.widget.findChild(QTreeWidget, "DataEntryFormNav")
         form_stack = form.widget.findChild(QStackedWidget, "DataEntryFormStack")
 
         self.assertIsNotNone(form_nav)
         self.assertIsNotNone(form_stack)
-        self.assertEqual(form_nav.count(), 2)
+        self.assertEqual(form_nav.topLevelItemCount(), 2)
         self.assertEqual(form_stack.count(), 2)
-        self.assertEqual(form_nav.item(0).text(), "Form A")
-        self.assertEqual(form_nav.item(1).text(), "Form B\n1/1 alan dolu")
-        self.assertEqual(form_nav.currentRow(), 1)
+        self.assertEqual(form_nav.topLevelItem(0).text(0), "Form A")
+        self.assertEqual(form_nav.topLevelItem(1).text(0), "Form B\n1/1 alan dolu")
+        self.assertEqual(form_nav.currentItem().text(0), "Form B\n1/1 alan dolu")
         self.assertEqual(form.current_section().form_name, "b")
         self.assertNotIn("a1", form.editor_widgets)
         self.assertIn("b1", form.editor_widgets)
 
-        form_nav.setCurrentRow(0)
+        form_nav.setCurrentItem(form_nav.topLevelItem(0))
 
         self.assertIn("a1", form.editor_widgets)
         self.assertEqual(form.current_section().form_name, "a")
@@ -246,17 +246,15 @@ class GuiDataEntryFormTests(unittest.TestCase):
                 ],
             )
         )
-        from PySide6.QtWidgets import QListWidget
+        from PySide6.QtWidgets import QTreeWidget
 
-        form_nav = form.widget.findChild(QListWidget, "DataEntryFormNav")
+        form_nav = form.widget.findChild(QTreeWidget, "DataEntryFormNav")
 
-        self.assertEqual([form_nav.item(index).text() for index in range(form_nav.count())], [
-            "Başlangıç",
-            "Hasta Bilgileri",
-            "Laboratuvar",
-            "İzlem",
-            "Hasta Bilgileri\n1/1 alan dolu",
-        ])
+        self.assertEqual(form_nav.topLevelItem(0).text(0), "Başlangıç")
+        self.assertEqual(form_nav.topLevelItem(0).child(0).text(0), "Hasta Bilgileri")
+        self.assertEqual(form_nav.topLevelItem(0).child(1).text(0), "Laboratuvar")
+        self.assertEqual(form_nav.topLevelItem(1).text(0), "İzlem")
+        self.assertEqual(form_nav.topLevelItem(1).child(0).text(0), "Hasta Bilgileri\n1/1 alan dolu")
         self.assertEqual(form.current_section().event_id, "followup_arm_1")
 
     def test_simple_branching_logic_hides_and_shows_fields(self) -> None:
@@ -425,7 +423,7 @@ class GuiDataEntryFormTests(unittest.TestCase):
             )
         )
 
-        form.form_nav.setCurrentRow(1)
+        form.form_nav.setCurrentItem(form.form_nav.topLevelItem(1))
         values = form.collect_values()
 
         self.assertEqual(values["hasta_ad@@event=baseline_arm_1@@instance="], "AB")

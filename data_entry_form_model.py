@@ -91,12 +91,15 @@ def build_form_render_model(
     form_labels = form_labels or {}
     event_labels = event_labels or {}
     form_event_map = normalize_form_event_map(form_event_map)
-    contexts_by_form = form_contexts_by_form(detail.field_values, field_specs_by_form, form_event_map)
+    field_values = list(detail.field_values)
+    contexts_by_form = form_contexts_by_form(field_values, field_specs_by_form, form_event_map)
+    direct_values_by_context, checkbox_values_by_context = value_maps_by_context(field_values)
     sections: list[FormSectionModel] = []
     for form_name, event_id, instance in ordered_form_contexts(field_specs_by_form, contexts_by_form):
         field_specs = field_specs_by_form[form_name]
-        direct_values = direct_value_map(detail.field_values, event_id=event_id, instance=instance)
-        checkbox_values = checkbox_value_map(detail.field_values, event_id=event_id, instance=instance)
+        context = context_key_tuple(event_id, instance)
+        direct_values = direct_values_by_context.get(context, {})
+        checkbox_values = checkbox_values_by_context.get(context, {})
         fields = [
             build_field_model(
                 spec,
@@ -242,6 +245,25 @@ def checkbox_value_is_selected(value: Any) -> bool:
     return normalized not in {"", "0", "false", "no", "hayir", "hay\u0131r"}
 
 
+def value_maps_by_context(
+    values: Iterable[RecordFieldValue],
+) -> tuple[dict[tuple[str, str], dict[str, RecordFieldValue]], dict[tuple[str, str], dict[str, set[str]]]]:
+    direct_maps: dict[tuple[str, str], dict[str, RecordFieldValue]] = {}
+    checkbox_maps: dict[tuple[str, str], dict[str, set[str]]] = {}
+    for value in values:
+        context = context_key_tuple(value.event_id, value.instance)
+        if "___" in value.field_name:
+            field_name, code = value.field_name.rsplit("___", 1)
+            if checkbox_value_is_selected(value.value):
+                checkbox_maps.setdefault(context, {}).setdefault(field_name, set()).add(code)
+            continue
+        mapped = direct_maps.setdefault(context, {})
+        existing = mapped.get(value.field_name)
+        if existing is None or record_value_is_better(value, existing):
+            mapped[value.field_name] = value
+    return direct_maps, checkbox_maps
+
+
 def form_contexts_by_form(
     values: Iterable[RecordFieldValue],
     field_specs_by_form: dict[str, list[Any]],
@@ -298,10 +320,11 @@ def append_context(contexts: list[tuple[str, str]], event_id: str | None, instan
 
 
 def record_value_matches_context(value: RecordFieldValue, *, event_id: str, instance: str) -> bool:
-    return (
-        normalize_context_part(value.event_id) == normalize_context_part(event_id)
-        and normalize_context_part(value.instance) == normalize_context_part(instance)
-    )
+    return context_key_tuple(value.event_id, value.instance) == context_key_tuple(event_id, instance)
+
+
+def context_key_tuple(event_id: Any, instance: Any) -> tuple[str, str]:
+    return (normalize_context_part(event_id), normalize_context_part(instance))
 
 
 def normalize_context_part(value: Any) -> str:

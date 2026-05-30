@@ -364,26 +364,26 @@ QScrollArea#DataEntrySectionScroll {
     border: none;
 }
 
-QListWidget#DataEntryFormNav {
+QListWidget#DataEntryFormNav, QTreeWidget#DataEntryFormNav {
     background: #ffffff;
     border: 1px solid #e0ded7;
     border-radius: 8px;
     padding: 8px;
 }
 
-QListWidget#DataEntryFormNav::item {
+QListWidget#DataEntryFormNav::item, QTreeWidget#DataEntryFormNav::item {
     color: #334155;
     padding: 9px 11px;
     border-radius: 7px;
     font-weight: 650;
 }
 
-QListWidget#DataEntryFormNav::item:selected {
+QListWidget#DataEntryFormNav::item:selected, QTreeWidget#DataEntryFormNav::item:selected {
     background: #102027;
     color: #ffffff;
 }
 
-QListWidget#DataEntryFormNav::item:hover {
+QListWidget#DataEntryFormNav::item:hover, QTreeWidget#DataEntryFormNav::item:hover {
     background: #edf8f4;
     color: #0f766e;
 }

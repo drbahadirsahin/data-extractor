@@ -121,6 +121,88 @@ class DataEntryFormModelTests(unittest.TestCase):
         self.assertEqual([section.title for section in model.sections], ["hasta_bilgileri", "hasta_bilgileri"])
         self.assertEqual([section.fields[0].event_id for section in model.sections], ["baseline_arm_1", "followup_arm_1"])
 
+    def test_form_event_map_is_authoritative_when_values_appear_in_other_events(self) -> None:
+        detail = RecordDetail(
+            project_id="17",
+            record="1",
+            forms=[
+                RecordFormSection(
+                    form_name="records",
+                    fields=[
+                        RecordFieldValue(field_name="hasta_ad", value="AB", event_id="wrong_event_arm_1"),
+                        RecordFieldValue(field_name="hasta_ad", value="CD", event_id="tbbi_bilgiler__tan_arm_1"),
+                        RecordFieldValue(field_name="psa", value="12", event_id="tbbi_bilgiler__tan_arm_1"),
+                        RecordFieldValue(field_name="psa", value="8", event_id="tan_laboratuvar_arm_1"),
+                    ],
+                )
+            ],
+        )
+        fields = {
+            "hasta_bilgileri": [FieldSpec("hasta_ad", "hasta_bilgileri", "text", "Hasta adı")],
+            "tan_laboratuvar_sonucu": [FieldSpec("psa", "tan_laboratuvar_sonucu", "text", "PSA")],
+        }
+
+        model = build_form_render_model(
+            detail,
+            fields,
+            form_event_map={
+                "hasta_bilgileri": ["tbbi_bilgiler__tan_arm_1"],
+                "tan_laboratuvar_sonucu": ["tan_laboratuvar_arm_1"],
+            },
+        )
+
+        self.assertEqual(
+            [(section.event_id, section.form_name, section.fields[0].value) for section in model.sections],
+            [
+                ("tbbi_bilgiler__tan_arm_1", "hasta_bilgileri", "CD"),
+                ("tan_laboratuvar_arm_1", "tan_laboratuvar_sonucu", "8"),
+            ],
+        )
+
+    def test_instances_are_used_only_for_repeating_forms_or_events(self) -> None:
+        detail = RecordDetail(
+            project_id="17",
+            record="1",
+            forms=[
+                RecordFormSection(
+                    form_name="records",
+                    fields=[
+                        RecordFieldValue(field_name="static_value", value="A", event_id="event_1", instance="1"),
+                        RecordFieldValue(field_name="repeat_value", value="B", event_id="event_1", instance="1"),
+                        RecordFieldValue(field_name="event_repeat", value="C", event_id="event_2", instance="1"),
+                    ],
+                )
+            ],
+        )
+        fields = {
+            "static_form": [FieldSpec("static_value", "static_form", "text", "Static")],
+            "repeat_form": [FieldSpec("repeat_value", "repeat_form", "text", "Repeat")],
+            "event_repeat_form": [FieldSpec("event_repeat", "event_repeat_form", "text", "Event Repeat")],
+        }
+
+        model = build_form_render_model(
+            detail,
+            fields,
+            form_event_map={
+                "static_form": ["event_1"],
+                "repeat_form": ["event_1"],
+                "event_repeat_form": ["event_2"],
+            },
+            repeating_forms=["repeat_form"],
+            repeating_events=["event_2"],
+        )
+
+        self.assertEqual(
+            [(section.form_name, section.event_id, section.instance) for section in model.sections],
+            [
+                ("static_form", "event_1", ""),
+                ("repeat_form", "event_1", ""),
+                ("repeat_form", "event_1", "1"),
+                ("event_repeat_form", "event_2", ""),
+                ("event_repeat_form", "event_2", "1"),
+            ],
+        )
+
     def test_maps_readonly_and_descriptive_fields(self) -> None:
         detail = RecordDetail(
             project_id="17",

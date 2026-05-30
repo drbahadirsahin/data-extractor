@@ -341,6 +341,8 @@ class ClinicalDataEntryPage:
                 form_labels=self.bundle.config.form_labels,
                 event_labels=self.bundle.config.event_labels,
                 form_event_map=self.bundle.config.form_event_map,
+                repeating_forms=self.bundle.config.repeating_forms,
+                repeating_events=self.bundle.config.repeating_events,
                 title=tr("data_entry_record_title", self.language, record=record),
             )
         except Exception as exc:
@@ -406,6 +408,8 @@ class ClinicalDataEntryPage:
             form_labels=self.bundle.config.form_labels,
             event_labels=self.bundle.config.event_labels,
             form_event_map=self.bundle.config.form_event_map,
+            repeating_forms=self.bundle.config.repeating_forms,
+            repeating_events=self.bundle.config.repeating_events,
             title=tr("data_entry_record_title", self.language, record=record_id),
         )
         self.form_widget.set_model(self.current_model)

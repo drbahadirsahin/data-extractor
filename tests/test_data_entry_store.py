@@ -16,7 +16,7 @@ class DataEntryStoreTests(unittest.TestCase):
             store = DataEntryStore(Path(temp_dir) / "data_entry.sqlite3")
             store.initialize()
 
-            self.assertEqual(store.schema_version(), 1)
+            self.assertEqual(store.schema_version(), 2)
 
             with store.connect() as db:
                 row = db.execute(

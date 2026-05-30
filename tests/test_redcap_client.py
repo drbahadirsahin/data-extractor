@@ -17,6 +17,7 @@ from redcap_client import (
     parse_instrument_response,
     parse_project_response,
     parse_repeating_events_response,
+    parse_repeating_form_event_map_response,
     parse_repeating_forms_response,
 )
 
@@ -106,6 +107,20 @@ class RedcapClientTests(unittest.TestCase):
             ]
         )
         self.assertEqual(parse_repeating_forms_response(json_response), ["lab_form", "visit_form"])
+
+    def test_parse_repeating_form_event_map_response_preserves_event_scope(self) -> None:
+        response = json.dumps(
+            [
+                {"event_name": "event_1_arm_1", "form_name": "lab_form"},
+                {"event_name": "event_2_arm_1", "instrument_name": "lab_form"},
+                {"event_name": "event_1_arm_1", "form_name": ""},
+            ]
+        )
+
+        self.assertEqual(
+            parse_repeating_form_event_map_response(response),
+            {"lab_form": ["event_1_arm_1", "event_2_arm_1"]},
+        )
 
     def test_parse_import_record_response_supports_json_and_scalar(self) -> None:
         self.assertEqual(parse_import_record_response('["101","102"]'), ["101", "102"])

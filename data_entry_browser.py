@@ -39,6 +39,7 @@ class RecordFieldValue:
     field_name: str
     value: str
     event_id: str = ""
+    repeat_instrument: str = ""
     instance: str = ""
     form_name: str = UNKNOWN_FORM_NAME
     field_label: str = ""
@@ -329,6 +330,7 @@ class DataEntryRecordBrowser:
                     record,
                     field_name,
                     value,
+                    repeat_instrument,
                     instance,
                     dag_unique_name,
                     remote_updated_at,
@@ -411,6 +413,7 @@ def record_field_value_from_row(row: dict[str, Any], definition: FieldDefinition
         value=str(row["value"]),
         event_id=normalize_key_part(row["event_id"]),
         instance=normalize_key_part(row["instance"]),
+        repeat_instrument=normalize_key_part(row["repeat_instrument"]),
         form_name=definition.form_name,
         field_label=definition.field_label,
         field_type=definition.field_type,
@@ -422,10 +425,11 @@ def record_field_value_from_row(row: dict[str, Any], definition: FieldDefinition
     )
 
 
-def value_row_key(row: dict[str, Any]) -> tuple[str, str, str]:
+def value_row_key(row: dict[str, Any]) -> tuple[str, str, str, str]:
     return (
         normalize_key_part(row["field_name"]),
         normalize_key_part(row["event_id"]),
+        normalize_key_part(row["repeat_instrument"]),
         normalize_key_part(row["instance"]),
     )
 

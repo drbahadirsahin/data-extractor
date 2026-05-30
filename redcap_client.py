@@ -137,6 +137,19 @@ class RedcapClient:
             raise RedcapAPIError(extract_xml_error_message(stripped))
         return parse_repeating_forms_response(stripped)
 
+    def export_repeating_form_event_map(self) -> dict[str, list[str]]:
+        payload = {
+            "token": self.api_token,
+            "content": "repeatingFormsEvents",
+            "format": "csv",
+            "returnFormat": "json",
+        }
+        response = self._post_form(payload)
+        stripped = response.strip()
+        if "<error>" in stripped.lower():
+            raise RedcapAPIError(extract_xml_error_message(stripped))
+        return parse_repeating_form_event_map_response(stripped)
+
     def export_repeating_events(self) -> list[str]:
         payload = {
             "token": self.api_token,
@@ -490,6 +503,22 @@ def parse_repeating_forms_response(response: str) -> list[str]:
         seen.add(form_name)
         repeating_forms.append(form_name)
     return repeating_forms
+
+
+def parse_repeating_form_event_map_response(response: str) -> dict[str, list[str]]:
+    raw_items = parse_json_or_csv_list(response)
+    mapping: dict[str, list[str]] = {}
+    for row in raw_items:
+        if not isinstance(row, dict):
+            continue
+        form_name = str(row.get("form_name") or row.get("instrument_name") or "").strip()
+        if not form_name:
+            continue
+        event_name = str(row.get("event_name") or row.get("unique_event_name") or "").strip()
+        bucket = mapping.setdefault(form_name, [])
+        if event_name and event_name not in bucket:
+            bucket.append(event_name)
+    return mapping
 
 
 def parse_repeating_events_response(response: str) -> list[str]:

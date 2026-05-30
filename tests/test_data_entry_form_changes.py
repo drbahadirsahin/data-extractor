@@ -186,7 +186,7 @@ class DataEntryFormChangesTests(unittest.TestCase):
                             "text",
                             "AB",
                             event_id="baseline_arm_1",
-                            context_key="hasta_ad@@event=baseline_arm_1@@instance=",
+                            context_key="hasta_ad@@event=baseline_arm_1@@repeat=@@instance=",
                         )
                     ],
                 ),
@@ -202,7 +202,7 @@ class DataEntryFormChangesTests(unittest.TestCase):
                             "text",
                             "CD",
                             event_id="followup_arm_1",
-                            context_key="hasta_ad@@event=followup_arm_1@@instance=",
+                            context_key="hasta_ad@@event=followup_arm_1@@repeat=@@instance=",
                         )
                     ],
                 ),
@@ -212,8 +212,8 @@ class DataEntryFormChangesTests(unittest.TestCase):
         change_set = build_form_change_set(
             model,
             {
-                "hasta_ad@@event=baseline_arm_1@@instance=": "AB",
-                "hasta_ad@@event=followup_arm_1@@instance=": "EF",
+                "hasta_ad@@event=baseline_arm_1@@repeat=@@instance=": "AB",
+                "hasta_ad@@event=followup_arm_1@@repeat=@@instance=": "EF",
             },
         )
 

@@ -35,22 +35,22 @@ class DataEntryFormWidget:
         self.field_state_labels: dict[str, Any] = {}
         self.form_nav: Any | None = None
         self.form_stack: Any | None = None
-        self._nav_section_role: Any | None = None
+        self.nav_buttons: dict[int, Any] = {}
+        self._current_section_index = 0
         self._rendered_sections: set[int] = set()
         self.model: FormRenderModel | None = None
         if model is not None:
             self.set_model(model)
 
     def set_model(self, model: FormRenderModel) -> None:
-        from PySide6.QtCore import QSize, Qt
-        from PySide6.QtGui import QBrush, QColor, QFont
+        from PySide6.QtCore import Qt
         from PySide6.QtWidgets import (
             QFrame,
             QHBoxLayout,
             QLabel,
+            QPushButton,
+            QScrollArea,
             QStackedWidget,
-            QTreeWidget,
-            QTreeWidgetItem,
             QVBoxLayout,
             QWidget,
         )
@@ -62,7 +62,8 @@ class DataEntryFormWidget:
         self.field_state_labels = {}
         self.form_nav = None
         self.form_stack = None
-        self._nav_section_role = None
+        self.nav_buttons = {}
+        self._current_section_index = 0
         self._rendered_sections = set()
         self.model = model
 
@@ -77,65 +78,57 @@ class DataEntryFormWidget:
             shell_layout.setContentsMargins(0, 0, 0, 0)
             shell_layout.setSpacing(14)
 
-            form_nav = QTreeWidget()
-            form_nav.setObjectName("DataEntryFormNav")
-            form_nav.setHeaderHidden(True)
-            form_nav.setMinimumWidth(280)
-            form_nav.setMaximumWidth(360)
-            form_nav.setWordWrap(True)
-            form_nav.setTextElideMode(Qt.TextElideMode.ElideNone)
-            form_nav.setRootIsDecorated(True)
-            form_nav.setIndentation(16)
-            form_nav.setItemsExpandable(False)
+            form_nav = QScrollArea()
+            form_nav.setObjectName("DataEntryFormNavScroll")
+            form_nav.setWidgetResizable(True)
+            form_nav.setMinimumWidth(320)
+            form_nav.setMaximumWidth(420)
+            form_nav.setFrameShape(QFrame.Shape.NoFrame)
+            form_nav.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+
+            nav_body = QWidget()
+            nav_body.setObjectName("DataEntryFormNav")
+            nav_layout = QVBoxLayout(nav_body)
+            nav_layout.setContentsMargins(8, 8, 8, 8)
+            nav_layout.setSpacing(6)
+            form_nav.setWidget(nav_body)
 
             form_stack = QStackedWidget()
             form_stack.setObjectName("DataEntryFormStack")
-            section_role = Qt.ItemDataRole.UserRole
-            self._nav_section_role = section_role
             has_event_groups = any(str(getattr(section, "event_label", "") or "") for section in model.sections)
-            event_items: dict[tuple[str, str], Any] = {}
+            event_items: set[tuple[str, str]] = set()
             for section_index, section in enumerate(model.sections):
-                event_key = (getattr(section, "event_id", ""), getattr(section, "instance", ""))
-                parent_item = None
-                if has_event_groups:
-                    parent_item = event_items.get(event_key)
-                    if parent_item is None:
-                        parent_item = QTreeWidgetItem([section.event_label or tr("data_entry_event_unspecified", self.language)])
-                        parent_item.setData(0, section_role, -1)
-                        parent_item.setFlags(Qt.ItemFlag.ItemIsEnabled)
-                        parent_item.setExpanded(True)
-                        parent_item.setFirstColumnSpanned(True)
-                        parent_item.setSizeHint(0, QSize(260, 32))
-                        event_font = QFont()
-                        event_font.setBold(True)
-                        parent_item.setFont(0, event_font)
-                        parent_item.setBackground(0, QBrush(QColor("#edf8f4")))
-                        parent_item.setForeground(0, QBrush(QColor("#0f766e")))
-                        form_nav.addTopLevelItem(parent_item)
-                        event_items[event_key] = parent_item
-                item = QTreeWidgetItem([nav_title_for_section(section, include_event=not has_event_groups)])
-                item.setToolTip(0, section_tooltip(section))
-                item.setData(0, section_role, section_index)
-                item.setSizeHint(0, QSize(260, 56 if section_filled_count(section) else 44))
-                if parent_item is not None:
-                    parent_item.addChild(item)
-                else:
-                    form_nav.addTopLevelItem(item)
+                event_instance = "" if getattr(section, "repeat_instrument", "") else getattr(section, "instance", "")
+                event_key = (getattr(section, "event_id", ""), event_instance)
+                if has_event_groups and event_key not in event_items:
+                    event_label = QLabel(section.event_label or tr("data_entry_event_unspecified", self.language))
+                    event_label.setObjectName("DataEntryFormNavEvent")
+                    event_label.setWordWrap(True)
+                    nav_layout.addWidget(event_label)
+                    event_items.add(event_key)
+                button = QPushButton(wrap_nav_title(nav_title_for_section(section, include_event=not has_event_groups)))
+                button.setObjectName("DataEntryFormNavButton")
+                button.setToolTip(section_tooltip(section))
+                button.setCheckable(True)
+                button.setProperty("section_index", section_index)
+                button.setMinimumHeight(nav_button_height(button.text()))
+                button.clicked.connect(lambda _checked=False, index=section_index: self.select_section(index))
+                nav_layout.addWidget(button)
+                self.nav_buttons[section_index] = button
                 placeholder = QWidget()
                 placeholder.setObjectName("DataEntrySectionPlaceholder")
                 placeholder_layout = QVBoxLayout(placeholder)
                 placeholder_layout.setContentsMargins(0, 0, 0, 0)
                 placeholder_layout.setSpacing(0)
                 form_stack.addWidget(placeholder)
-            form_nav.currentItemChanged.connect(lambda current, previous=None: self.handle_nav_item_changed(current))
-            form_nav.expandAll()
+            nav_layout.addStretch(1)
             first_index = first_section_with_values(model.sections)
             self.form_nav = form_nav
             self.form_stack = form_stack
-            select_nav_row_for_section(form_nav, first_index, section_role)
             shell_layout.addWidget(form_nav, 0)
             shell_layout.addWidget(form_stack, 1)
             self.layout.addWidget(shell, 1)
+            self.select_section(first_index)
         else:
             for section in model.sections:
                 self.layout.addWidget(self.build_section_scroll(section), 1)
@@ -160,17 +153,18 @@ class DataEntryFormWidget:
         scroll.setWidget(container)
         return scroll
 
-    def handle_nav_item_changed(self, item: Any) -> None:
-        if self.form_nav is None or self.form_stack is None or self._nav_section_role is None:
+    def select_section(self, section_index: int) -> None:
+        if self.form_stack is None or self.model is None:
             return
-        if item is None:
+        if section_index < 0 or section_index >= len(self.model.sections):
             return
-        section_index = item.data(0, self._nav_section_role)
-        if section_index is None or int(section_index) < 0:
-            return
-        index = int(section_index)
-        self.render_section_at(index)
-        self.form_stack.setCurrentIndex(index)
+        self.render_section_at(section_index)
+        self.form_stack.setCurrentIndex(section_index)
+        self._current_section_index = section_index
+        for index, button in self.nav_buttons.items():
+            button.setChecked(index == section_index)
+            button.setProperty("active", index == section_index)
+            repolish(button)
         self.update_branching_visibility()
 
     def render_section_at(self, section_index: int) -> None:
@@ -205,7 +199,7 @@ class DataEntryFormWidget:
                 event_title.setObjectName("SectionEventTitle")
                 event_title.setWordWrap(True)
                 layout.addWidget(event_title)
-            title = QLabel(section.title)
+            title = QLabel(section_display_title(section))
             title.setObjectName("SectionTitle")
             title.setWordWrap(True)
             layout.addWidget(title)
@@ -526,15 +520,9 @@ class DataEntryFormWidget:
         return self.model.sections[index]
 
     def current_section_index(self) -> int:
-        if self.form_nav is None or self._nav_section_role is None:
+        if self.form_nav is None:
             return 0
-        item = self.form_nav.currentItem()
-        if item is None:
-            return -1
-        section_index = item.data(0, self._nav_section_role)
-        if section_index is None:
-            return -1
-        return int(section_index)
+        return self._current_section_index
 
     def apply_values(self, values: dict[str, Any], *, field_names: set[str] | None = None) -> int:
         applied = 0
@@ -643,7 +631,11 @@ class DataEntryFormWidget:
     def branching_values_for_context(self, target_field: FormFieldModel) -> dict[str, Any]:
         values: dict[str, Any] = {}
         for field in self.model.fields if self.model is not None else []:
-            if field.event_id != target_field.event_id or field.instance != target_field.instance:
+            if (
+                field.event_id != target_field.event_id
+                or field.repeat_instrument != target_field.repeat_instrument
+                or field.instance != target_field.instance
+            ):
                 continue
             value = self.current_field_value(field)
             if field.editor == CHECKBOX_EDITOR:
@@ -759,7 +751,7 @@ def repolish(widget: Any) -> None:
 def nav_title_for_section(section: Any, *, include_event: bool = True) -> str:
     filled = section_filled_count(section)
     total = len(getattr(section, "fields", []) or [])
-    title = str(section.title)
+    title = section_display_title(section)
     if include_event and getattr(section, "event_label", ""):
         title = f"{section.event_label} - {title}"
     if filled:
@@ -767,30 +759,40 @@ def nav_title_for_section(section: Any, *, include_event: bool = True) -> str:
     return title
 
 
+def wrap_nav_title(title: str, *, width: int = 30) -> str:
+    lines: list[str] = []
+    for raw_line in str(title or "").splitlines():
+        words = raw_line.split()
+        if not words:
+            lines.append("")
+            continue
+        current = words[0]
+        for word in words[1:]:
+            if len(current) + 1 + len(word) <= width:
+                current = f"{current} {word}"
+            else:
+                lines.append(current)
+                current = word
+        lines.append(current)
+    return "\n".join(lines)
+
+
+def nav_button_height(text: str) -> int:
+    line_count = max(1, len(str(text or "").splitlines()))
+    return max(42, 24 + (line_count * 18))
+
+
 def section_tooltip(section: Any) -> str:
     if getattr(section, "event_label", ""):
-        return f"{section.event_label}\n{section.title}"
-    return str(section.title)
+        return f"{section.event_label}\n{section_display_title(section)}"
+    return section_display_title(section)
 
 
-def select_nav_row_for_section(form_nav: Any, section_index: int, role: Any) -> None:
-    for item in iter_tree_items(form_nav):
-        if item is not None and item.data(0, role) == section_index:
-            form_nav.setCurrentItem(item)
-            return
-    first_item = form_nav.topLevelItem(0)
-    if first_item is not None:
-        form_nav.setCurrentItem(first_item)
-
-
-def iter_tree_items(tree: Any) -> list[Any]:
-    items: list[Any] = []
-    for top_index in range(tree.topLevelItemCount()):
-        top_item = tree.topLevelItem(top_index)
-        items.append(top_item)
-        for child_index in range(top_item.childCount()):
-            items.append(top_item.child(child_index))
-    return items
+def section_display_title(section: Any) -> str:
+    title = str(getattr(section, "title", "") or "")
+    if getattr(section, "repeat_instrument", "") and getattr(section, "instance", ""):
+        return f"{title} #{section.instance}"
+    return title
 
 
 def first_section_with_values(sections: list[Any]) -> int:

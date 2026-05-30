@@ -273,7 +273,7 @@ class ClinicalDataEntryPage:
                 continue
             try:
                 token = self.runtime.secrets_store.get(project.token_secret_name)
-                if token and project_config_needs_event_labels(config_path):
+                if token and project_config_needs_server_metadata(config_path):
                     ensure_server_metadata_in_config(config_path, api_url=project.api_url, api_token=token)
                 bundle = load_workspace_bundle(config_path)
             except Exception as exc:
@@ -342,6 +342,7 @@ class ClinicalDataEntryPage:
                 event_labels=self.bundle.config.event_labels,
                 form_event_map=self.bundle.config.form_event_map,
                 repeating_forms=self.bundle.config.repeating_forms,
+                repeating_form_event_map=self.bundle.config.repeating_form_event_map,
                 repeating_events=self.bundle.config.repeating_events,
                 title=tr("data_entry_record_title", self.language, record=record),
             )
@@ -409,6 +410,7 @@ class ClinicalDataEntryPage:
             event_labels=self.bundle.config.event_labels,
             form_event_map=self.bundle.config.form_event_map,
             repeating_forms=self.bundle.config.repeating_forms,
+            repeating_form_event_map=self.bundle.config.repeating_form_event_map,
             repeating_events=self.bundle.config.repeating_events,
             title=tr("data_entry_record_title", self.language, record=record_id),
         )
@@ -721,18 +723,22 @@ def candidate_project_config_paths(runtime: Any, project_id: str) -> list[Path]:
     return deduped
 
 
-def project_config_needs_event_labels(config_path: Path) -> bool:
+def project_config_needs_server_metadata(config_path: Path) -> bool:
     try:
         payload = json.loads(config_path.read_text(encoding="utf-8"))
     except Exception:
         return False
     event_labels = payload.get("event_labels")
     form_event_map = payload.get("form_event_map")
-    if event_labels:
-        return False
     if not isinstance(form_event_map, dict):
         return False
-    return any(bool(events) for events in form_event_map.values())
+    has_event_mapped_forms = any(bool(events) for events in form_event_map.values())
+    repeating_forms = payload.get("repeating_forms")
+    repeating_form_event_map = payload.get("repeating_form_event_map")
+    return bool(
+        (has_event_mapped_forms and not event_labels)
+        or (repeating_forms and not repeating_form_event_map)
+    )
 
 
 def data_entry_label_fields(app_config: dict[str, Any]) -> list[str]:
@@ -803,12 +809,22 @@ def redcap_event_name_for_change(change: dict[str, Any], field: Any, bundle: Wor
 
 
 def redcap_repeat_instrument_for_change(change: dict[str, Any], field: Any, bundle: WorkspaceBundle | None) -> str:
+    configured = str(change.get("repeat_instrument") or "")
+    if configured:
+        return configured
     if not str(change.get("instance") or ""):
         return ""
     if bundle is None or field is None:
         return ""
+    form_name = str(field.form_name)
+    event_name = redcap_event_name_for_change(change, field, bundle)
+    repeating_form_event_map = bundle.config.repeating_form_event_map or {}
+    if form_name in repeating_form_event_map:
+        events = {str(item) for item in repeating_form_event_map.get(form_name, [])}
+        if not events or event_name in events:
+            return form_name
     repeating_forms = set(bundle.config.repeating_forms or [])
-    return field.form_name if field.form_name in repeating_forms else ""
+    return form_name if form_name in repeating_forms and event_name not in set(bundle.config.repeating_events or []) else ""
 
 
 def prompt_ai_fill_options(

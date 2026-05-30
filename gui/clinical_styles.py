@@ -364,28 +364,43 @@ QScrollArea#DataEntrySectionScroll {
     border: none;
 }
 
-QListWidget#DataEntryFormNav, QTreeWidget#DataEntryFormNav {
+QScrollArea#DataEntryFormNavScroll {
     background: #ffffff;
     border: 1px solid #e0ded7;
     border-radius: 8px;
-    padding: 8px;
 }
 
-QListWidget#DataEntryFormNav::item, QTreeWidget#DataEntryFormNav::item {
+QWidget#DataEntryFormNav {
+    background: #ffffff;
+}
+
+QLabel#DataEntryFormNavEvent {
     color: #334155;
-    padding: 9px 11px;
+    font-size: 12px;
+    font-weight: 780;
+    padding: 8px 6px 4px 6px;
+    border-top: 1px solid #ece7df;
+}
+
+QPushButton#DataEntryFormNavButton {
+    background: #ffffff;
+    color: #334155;
+    border: 1px solid transparent;
     border-radius: 7px;
+    padding: 9px 11px;
+    text-align: left;
     font-weight: 650;
 }
 
-QListWidget#DataEntryFormNav::item:selected, QTreeWidget#DataEntryFormNav::item:selected {
-    background: #102027;
-    color: #ffffff;
-}
-
-QListWidget#DataEntryFormNav::item:hover, QTreeWidget#DataEntryFormNav::item:hover {
+QPushButton#DataEntryFormNavButton:hover {
     background: #edf8f4;
     color: #0f766e;
+}
+
+QPushButton#DataEntryFormNavButton[active="true"] {
+    background: #102027;
+    color: #ffffff;
+    border: 1px solid #102027;
 }
 
 QStackedWidget#DataEntryFormStack {

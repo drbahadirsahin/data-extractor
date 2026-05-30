@@ -103,7 +103,10 @@ class DataEntryFormModelTests(unittest.TestCase):
 
         self.assertEqual([section.event_id for section in model.sections], ["baseline_arm_1", "tbbi_bilgiler__tan_arm_1"])
         self.assertEqual([section.fields[0].value for section in model.sections], ["", "AH"])
-        self.assertEqual(model.sections[1].fields[0].context_key, "hasta_ad@@event=tbbi_bilgiler__tan_arm_1@@instance=")
+        self.assertEqual(
+            model.sections[1].fields[0].context_key,
+            "hasta_ad@@event=tbbi_bilgiler__tan_arm_1@@repeat=@@instance=",
+        )
 
     def test_uses_form_event_map_to_group_blank_forms_by_event(self) -> None:
         detail = RecordDetail(project_id="17", record="1")
@@ -168,7 +171,13 @@ class DataEntryFormModelTests(unittest.TestCase):
                     form_name="records",
                     fields=[
                         RecordFieldValue(field_name="static_value", value="A", event_id="event_1", instance="1"),
-                        RecordFieldValue(field_name="repeat_value", value="B", event_id="event_1", instance="1"),
+                        RecordFieldValue(
+                            field_name="repeat_value",
+                            value="B",
+                            event_id="event_1",
+                            repeat_instrument="repeat_form",
+                            instance="1",
+                        ),
                         RecordFieldValue(field_name="event_repeat", value="C", event_id="event_2", instance="1"),
                     ],
                 )
@@ -196,10 +205,74 @@ class DataEntryFormModelTests(unittest.TestCase):
             [(section.form_name, section.event_id, section.instance) for section in model.sections],
             [
                 ("static_form", "event_1", ""),
-                ("repeat_form", "event_1", ""),
                 ("repeat_form", "event_1", "1"),
-                ("event_repeat_form", "event_2", ""),
                 ("event_repeat_form", "event_2", "1"),
+            ],
+        )
+
+    def test_repeating_form_instances_do_not_create_blank_sibling_instances(self) -> None:
+        detail = RecordDetail(
+            project_id="17",
+            record="1",
+            forms=[
+                RecordFormSection(
+                    form_name="records",
+                    fields=[
+                        RecordFieldValue(
+                            field_name="lab_psa",
+                            value="4.2",
+                            event_id="event_1",
+                            repeat_instrument="tan_laboratuvar_sonucu",
+                            instance="1",
+                        ),
+                        RecordFieldValue(
+                            field_name="lab_psa",
+                            value="5.1",
+                            event_id="event_1",
+                            repeat_instrument="tan_laboratuvar_sonucu",
+                            instance="2",
+                        ),
+                        RecordFieldValue(
+                            field_name="aile_kanser",
+                            value="",
+                            event_id="event_1",
+                            repeat_instrument="tan_laboratuvar_sonucu",
+                            instance="1",
+                        ),
+                        RecordFieldValue(
+                            field_name="aile_kanser",
+                            value="",
+                            event_id="event_1",
+                            repeat_instrument="tan_laboratuvar_sonucu",
+                            instance="2",
+                        ),
+                    ],
+                )
+            ],
+        )
+        fields = {
+            "ailede_dier_kanser_yks": [FieldSpec("aile_kanser", "ailede_dier_kanser_yks", "text", "Kanser")],
+            "tan_laboratuvar_sonucu": [FieldSpec("lab_psa", "tan_laboratuvar_sonucu", "text", "PSA")],
+        }
+
+        model = build_form_render_model(
+            detail,
+            fields,
+            form_event_map={
+                "ailede_dier_kanser_yks": ["event_1"],
+                "tan_laboratuvar_sonucu": ["event_1"],
+            },
+            repeating_form_event_map={
+                "ailede_dier_kanser_yks": ["event_1"],
+                "tan_laboratuvar_sonucu": ["event_1"],
+            },
+        )
+
+        self.assertEqual(
+            [(section.form_name, section.repeat_instrument, section.instance) for section in model.sections],
+            [
+                ("tan_laboratuvar_sonucu", "tan_laboratuvar_sonucu", "1"),
+                ("tan_laboratuvar_sonucu", "tan_laboratuvar_sonucu", "2"),
             ],
         )
 

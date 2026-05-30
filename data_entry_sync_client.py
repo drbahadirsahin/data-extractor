@@ -61,6 +61,7 @@ WIDE_RECORD_META_KEYS = {
     "redcap_event_name",
     "event",
     "redcap_repeat_instrument",
+    "repeat_instrument",
     "redcap_repeat_instance",
     "instance",
     "redcap_data_access_group",
@@ -463,6 +464,7 @@ def parse_record_rows(
                 record=record,
                 field_name=field_name,
                 value=optional_text(row.get("value")) or "",
+                repeat_instrument=first_text(row, ["repeat_instrument", "redcap_repeat_instrument"]) or "",
                 instance=first_text(row, ["instance", "redcap_repeat_instance"]),
                 dag_unique_name=first_text(
                     row,
@@ -484,6 +486,7 @@ def parse_wide_record_row(row: dict[str, Any], *, root: dict[str, Any]) -> list[
         return []
     project_id = first_text(row, ["project_id"]) or first_text(root, ["project_id"]) or ""
     event_id = first_text(row, ["event_id", "redcap_event_name", "event"])
+    repeat_instrument = first_text(row, ["repeat_instrument", "redcap_repeat_instrument"]) or ""
     instance = first_text(row, ["instance", "redcap_repeat_instance"])
     dag_unique_name = first_text(
         row,
@@ -506,6 +509,7 @@ def parse_wide_record_row(row: dict[str, Any], *, root: dict[str, Any]) -> list[
                 record=record,
                 field_name=str(key),
                 value=optional_text(raw_value) or "",
+                repeat_instrument=repeat_instrument,
                 instance=instance,
                 dag_unique_name=dag_unique_name,
                 remote_updated_at=remote_updated_at,

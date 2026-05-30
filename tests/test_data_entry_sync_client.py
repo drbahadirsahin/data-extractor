@@ -198,6 +198,8 @@ class DataEntrySyncClientTests(unittest.TestCase):
                     {
                         "record_id": "123",
                         "redcap_event_name": "baseline_arm_1",
+                        "redcap_repeat_instrument": "tan_laboratuvar_sonucu",
+                        "redcap_repeat_instance": "2",
                         "data_access_group_unique_name": "marmara",
                         "record_last_modified_at": "2026-05-24 10:25:00",
                         "hasta_ad": "AHMET",
@@ -213,6 +215,8 @@ class DataEntrySyncClientTests(unittest.TestCase):
         self.assertEqual(by_field["hasta_ad"].project_id, "17")
         self.assertEqual(by_field["hasta_ad"].record, "123")
         self.assertEqual(by_field["hasta_ad"].event_id, "baseline_arm_1")
+        self.assertEqual(by_field["hasta_ad"].repeat_instrument, "tan_laboratuvar_sonucu")
+        self.assertEqual(by_field["hasta_ad"].instance, "2")
         self.assertEqual(by_field["hasta_ad"].value, "AHMET")
         self.assertEqual(by_field["hasta_ad"].dag_unique_name, "marmara")
         self.assertEqual(by_field["risk___1"].value, "1")
@@ -305,6 +309,7 @@ class DataEntrySyncClientTests(unittest.TestCase):
         self.assertEqual(response.project_id, "17")
         self.assertEqual(by_field["hasta_ad"].record, "96-6")
         self.assertEqual(by_field["hasta_ad"].event_id, "tbbi_bilgiler__tan_arm_1")
+        self.assertEqual(by_field["hasta_ad"].repeat_instrument, "")
         self.assertEqual(by_field["hasta_ad"].dag_unique_name, "marmara_niversitesb")
         self.assertEqual(by_field["hasta_ad"].value, "AH")
         self.assertEqual(by_field["hasta_soyad"].value, "AŞCI")

@@ -161,6 +161,7 @@ def fill_missing_project_ids(
                 record=value.record,
                 field_name=value.field_name,
                 value=value.value,
+                repeat_instrument=value.repeat_instrument,
                 instance=value.instance,
                 dag_unique_name=value.dag_unique_name or (record_manifest.dag_unique_name if record_manifest else None),
                 remote_updated_at=value.remote_updated_at

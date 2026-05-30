@@ -38,6 +38,8 @@
     "field_annotation": "Field Annotation"
   },
   "repeating_forms": [],
+  "repeating_form_event_map": {},
+  "repeating_events": [],
   "prompting": {
     "language": "tr",
     "instructions": [

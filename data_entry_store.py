@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
 @dataclass(frozen=True)
@@ -29,6 +29,7 @@ class RedcapDataValue:
     record: str
     field_name: str
     value: str
+    repeat_instrument: str | None = None
     instance: str | None = None
     dag_unique_name: str | None = None
     remote_updated_at: str | None = None
@@ -104,17 +105,18 @@ class DataEntryStore:
                     record TEXT NOT NULL,
                     field_name TEXT NOT NULL,
                     value TEXT NOT NULL DEFAULT '',
+                    repeat_instrument TEXT NOT NULL DEFAULT '',
                     instance TEXT NOT NULL DEFAULT '',
                     dag_unique_name TEXT,
                     remote_updated_at TEXT,
                     local_updated_at TEXT,
                     source TEXT NOT NULL DEFAULT 'remote',
                     dirty INTEGER NOT NULL DEFAULT 0,
-                    PRIMARY KEY (project_id, event_id, record, field_name, instance)
+                    PRIMARY KEY (project_id, event_id, record, field_name, repeat_instrument, instance)
                 );
 
                 CREATE VIEW IF NOT EXISTS redcap_data AS
-                    SELECT project_id, event_id, record, field_name, value, instance
+                    SELECT project_id, event_id, record, field_name, value, repeat_instrument, instance
                     FROM redcap_data_values;
 
                 CREATE TABLE IF NOT EXISTS identity_hash_map (
@@ -133,6 +135,7 @@ class DataEntryStore:
                     event_id TEXT NOT NULL DEFAULT '',
                     record TEXT NOT NULL,
                     field_name TEXT NOT NULL,
+                    repeat_instrument TEXT NOT NULL DEFAULT '',
                     instance TEXT NOT NULL DEFAULT '',
                     old_value TEXT,
                     new_value TEXT NOT NULL DEFAULT '',
@@ -182,6 +185,7 @@ class DataEntryStore:
                     ON pending_changes (project_id, status);
                 """
             )
+            self._migrate_schema(db)
             db.execute(
                 """
                 INSERT INTO data_entry_meta(key, value)
@@ -299,6 +303,7 @@ class DataEntryStore:
         with self.connect() as db:
             for value in values:
                 event_id = normalize_key_part(value.event_id)
+                repeat_instrument = normalize_key_part(value.repeat_instrument)
                 instance = normalize_key_part(value.instance)
                 remote_updated_at = value.remote_updated_at
                 db.execute(
@@ -309,6 +314,7 @@ class DataEntryStore:
                         record,
                         field_name,
                         value,
+                        repeat_instrument,
                         instance,
                         dag_unique_name,
                         remote_updated_at,
@@ -316,8 +322,8 @@ class DataEntryStore:
                         source,
                         dirty
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'remote', 0)
-                    ON CONFLICT(project_id, event_id, record, field_name, instance)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'remote', 0)
+                    ON CONFLICT(project_id, event_id, record, field_name, repeat_instrument, instance)
                     DO UPDATE SET
                         value = excluded.value,
                         dag_unique_name = excluded.dag_unique_name,
@@ -332,6 +338,7 @@ class DataEntryStore:
                         str(value.record),
                         str(value.field_name),
                         str(value.value),
+                        repeat_instrument,
                         instance,
                         value.dag_unique_name,
                         remote_updated_at,
@@ -384,7 +391,7 @@ class DataEntryStore:
 
     def redcap_data_rows(self, project_id: str, record: str | None = None) -> list[dict[str, Any]]:
         query = """
-            SELECT project_id, event_id, record, field_name, value, instance
+            SELECT project_id, event_id, record, field_name, value, repeat_instrument, instance
             FROM redcap_data_values
             WHERE project_id = ?
         """
@@ -405,12 +412,14 @@ class DataEntryStore:
         field_name: str,
         new_value: str,
         event_id: str | None = None,
+        repeat_instrument: str | None = None,
         instance: str | None = None,
         base_remote_updated_at: str | None = None,
         source: str = "manual",
         payload: dict[str, Any] | None = None,
     ) -> int:
         event_key = normalize_key_part(event_id)
+        repeat_instrument_key = normalize_key_part(repeat_instrument)
         instance_key = normalize_key_part(instance)
         created_at = utc_now()
         with self.connect() as db:
@@ -418,9 +427,9 @@ class DataEntryStore:
                 """
                 SELECT value, dag_unique_name, remote_updated_at
                 FROM redcap_data_values
-                WHERE project_id = ? AND event_id = ? AND record = ? AND field_name = ? AND instance = ?
+                WHERE project_id = ? AND event_id = ? AND record = ? AND field_name = ? AND repeat_instrument = ? AND instance = ?
                 """,
-                (str(project_id), event_key, str(record), str(field_name), instance_key),
+                (str(project_id), event_key, str(record), str(field_name), repeat_instrument_key, instance_key),
             ).fetchone()
             old_value = str(existing["value"]) if existing is not None else None
             remote_updated_at = (
@@ -435,6 +444,7 @@ class DataEntryStore:
                     record,
                     field_name,
                     value,
+                    repeat_instrument,
                     instance,
                     dag_unique_name,
                     remote_updated_at,
@@ -442,8 +452,8 @@ class DataEntryStore:
                     source,
                     dirty
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'local', 1)
-                ON CONFLICT(project_id, event_id, record, field_name, instance)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'local', 1)
+                ON CONFLICT(project_id, event_id, record, field_name, repeat_instrument, instance)
                 DO UPDATE SET
                     value = excluded.value,
                     local_updated_at = excluded.local_updated_at,
@@ -456,6 +466,7 @@ class DataEntryStore:
                     str(record),
                     str(field_name),
                     str(new_value),
+                    repeat_instrument_key,
                     instance_key,
                     str(existing["dag_unique_name"]) if existing is not None and existing["dag_unique_name"] else None,
                     remote_updated_at,
@@ -469,6 +480,7 @@ class DataEntryStore:
                     event_id,
                     record,
                     field_name,
+                    repeat_instrument,
                     instance,
                     old_value,
                     new_value,
@@ -478,13 +490,14 @@ class DataEntryStore:
                     source,
                     payload_json
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?)
                 """,
                 (
                     str(project_id),
                     event_key,
                     str(record),
                     str(field_name),
+                    repeat_instrument_key,
                     instance_key,
                     old_value,
                     str(new_value),
@@ -682,6 +695,90 @@ class DataEntryStore:
                 project_id,
                 record,
             ),
+        )
+
+    def _migrate_schema(self, db: sqlite3.Connection) -> None:
+        redcap_columns = {
+            str(row["name"])
+            for row in db.execute("PRAGMA table_info(redcap_data_values)").fetchall()
+        }
+        if redcap_columns and "repeat_instrument" not in redcap_columns:
+            db.executescript(
+                """
+                DROP VIEW IF EXISTS redcap_data;
+
+                CREATE TABLE redcap_data_values_v2 (
+                    project_id TEXT NOT NULL,
+                    event_id TEXT NOT NULL DEFAULT '',
+                    record TEXT NOT NULL,
+                    field_name TEXT NOT NULL,
+                    value TEXT NOT NULL DEFAULT '',
+                    repeat_instrument TEXT NOT NULL DEFAULT '',
+                    instance TEXT NOT NULL DEFAULT '',
+                    dag_unique_name TEXT,
+                    remote_updated_at TEXT,
+                    local_updated_at TEXT,
+                    source TEXT NOT NULL DEFAULT 'remote',
+                    dirty INTEGER NOT NULL DEFAULT 0,
+                    PRIMARY KEY (project_id, event_id, record, field_name, repeat_instrument, instance)
+                );
+
+                INSERT OR REPLACE INTO redcap_data_values_v2(
+                    project_id,
+                    event_id,
+                    record,
+                    field_name,
+                    value,
+                    repeat_instrument,
+                    instance,
+                    dag_unique_name,
+                    remote_updated_at,
+                    local_updated_at,
+                    source,
+                    dirty
+                )
+                SELECT
+                    project_id,
+                    event_id,
+                    record,
+                    field_name,
+                    value,
+                    '',
+                    instance,
+                    dag_unique_name,
+                    remote_updated_at,
+                    local_updated_at,
+                    source,
+                    dirty
+                FROM redcap_data_values;
+
+                DROP TABLE redcap_data_values;
+                ALTER TABLE redcap_data_values_v2 RENAME TO redcap_data_values;
+
+                CREATE VIEW redcap_data AS
+                    SELECT project_id, event_id, record, field_name, value, repeat_instrument, instance
+                    FROM redcap_data_values;
+                """
+            )
+        pending_columns = {
+            str(row["name"])
+            for row in db.execute("PRAGMA table_info(pending_changes)").fetchall()
+        }
+        if pending_columns and "repeat_instrument" not in pending_columns:
+            db.execute(
+                "ALTER TABLE pending_changes ADD COLUMN repeat_instrument TEXT NOT NULL DEFAULT ''"
+            )
+        db.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_redcap_data_record
+                ON redcap_data_values (project_id, record)
+            """
+        )
+        db.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_redcap_data_field
+                ON redcap_data_values (project_id, field_name)
+            """
         )
 
 

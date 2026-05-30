@@ -115,6 +115,10 @@ def ensure_project_config(
     except Exception:
         repeating_forms = []
     try:
+        repeating_form_event_map = client.export_repeating_form_event_map()
+    except Exception:
+        repeating_form_event_map = {}
+    try:
         repeating_events = client.export_repeating_events()
     except Exception:
         repeating_events = []
@@ -132,6 +136,7 @@ def ensure_project_config(
     blank_config["form_labels"] = dict(form_labels)
     blank_config["event_labels"] = dict(event_labels)
     blank_config["repeating_forms"] = list(repeating_forms)
+    blank_config["repeating_form_event_map"] = dict(repeating_form_event_map)
     blank_config["repeating_events"] = list(repeating_events)
     blank_config["form_event_map"] = dict(form_event_map)
     blank_config["dictionary_legend"] = default_redcap_api_dictionary_legend()
@@ -407,12 +412,14 @@ def ensure_server_metadata_in_config(config_path: Path, *, api_url: str, api_tok
     )
     needs_event_labels = not bool(config.event_labels)
     needs_repeating_forms = not bool(config.repeating_forms)
+    needs_repeating_form_event_map = not bool(config.repeating_form_event_map)
     needs_repeating_events = not bool(config.repeating_events)
     needs_form_event_map = not bool(config.form_event_map)
     if (
         not needs_form_labels
         and not needs_event_labels
         and not needs_repeating_forms
+        and not needs_repeating_form_event_map
         and not needs_repeating_events
         and not needs_form_event_map
     ):
@@ -446,6 +453,15 @@ def ensure_server_metadata_in_config(config_path: Path, *, api_url: str, api_tok
             repeating_forms = []
         if repeating_forms:
             config.repeating_forms = list(repeating_forms)
+            changed = True
+
+    if needs_repeating_form_event_map:
+        try:
+            repeating_form_event_map = client.export_repeating_form_event_map()
+        except Exception:
+            repeating_form_event_map = {}
+        if repeating_form_event_map:
+            config.repeating_form_event_map = dict(repeating_form_event_map)
             changed = True
 
     if needs_repeating_events:

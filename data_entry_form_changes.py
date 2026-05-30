@@ -20,6 +20,7 @@ class DataEntryFieldChange:
     old_value: str
     new_value: str
     event_id: str = ""
+    repeat_instrument: str = ""
     instance: str = ""
     field_label: str = ""
     editor: str = ""
@@ -80,6 +81,7 @@ def build_form_change_set(
                 old_value=old_value,
                 new_value=new_value,
                 event_id=field.event_id,
+                repeat_instrument=field.repeat_instrument,
                 instance=field.instance,
                 field_label=field.label,
                 editor=field.editor,
@@ -111,6 +113,7 @@ def apply_form_changes(
                 field_name=change.field_name,
                 new_value=change.new_value,
                 event_id=change.event_id,
+                repeat_instrument=change.repeat_instrument,
                 instance=change.instance,
                 source=source,
                 payload={
@@ -149,6 +152,7 @@ def checkbox_field_changes(
                 old_value=old_value,
                 new_value=new_value,
                 event_id=field.event_id,
+                repeat_instrument=field.repeat_instrument,
                 instance=field.instance,
                 field_label=f"{field.label}: {choice.label}",
                 editor=field.editor,

@@ -55,11 +55,11 @@ class WorkspaceBundle:
         return [field.field_name for field in self.grouped_fields.get(form_name, [])]
 
 
-def load_workspace_bundle(config_path: str | Path) -> WorkspaceBundle:
+def load_workspace_bundle(config_path: str | Path, *, data_entry: bool = False) -> WorkspaceBundle:
     resolved = Path(config_path).expanduser().resolve()
     config = load_project_config(str(resolved))
     config.dictionary_path = resolve_relative_to_config(resolved, config.dictionary_path)
-    grouped_fields = load_workspace_dictionary(config)
+    grouped_fields = load_workspace_dictionary(config, extractable_only=not data_entry)
     return WorkspaceBundle(
         config_path=resolved,
         config=config,
@@ -263,7 +263,7 @@ def save_workspace_bundle(bundle: WorkspaceBundle) -> None:
     save_project_config(bundle.config_path, config)
 
 
-def load_workspace_dictionary(config: ProjectConfig) -> dict[str, list[FieldSpec]]:
+def load_workspace_dictionary(config: ProjectConfig, *, extractable_only: bool = True) -> dict[str, list[FieldSpec]]:
     df = pd.read_csv(config.dictionary_path)
     missing_columns = [col for col in config.dictionary_legend.values() if col not in df.columns]
     if missing_columns:
@@ -275,7 +275,8 @@ def load_workspace_dictionary(config: ProjectConfig) -> dict[str, list[FieldSpec
     field_specs = [parse_field(config, record) for record in records]
     field_specs = apply_repeating_forms(config, field_specs)
     field_specs = apply_overrides(config, field_specs)
-    field_specs = get_extractable_fields(field_specs)
+    if extractable_only:
+        field_specs = get_extractable_fields(field_specs)
     field_specs = filter_hidden_fields(field_specs)
     return group_fields_by_form(field_specs)
 

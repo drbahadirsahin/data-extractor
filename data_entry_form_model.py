@@ -91,6 +91,7 @@ def build_form_render_model(
     repeating_forms: Iterable[str] | None = None,
     repeating_form_event_map: dict[str, list[str]] | None = None,
     repeating_events: Iterable[str] | None = None,
+    additional_contexts_by_form: dict[str, list[tuple[str, str, str]]] | None = None,
     title: str | None = None,
 ) -> FormRenderModel:
     form_labels = form_labels or {}
@@ -110,6 +111,7 @@ def build_form_render_model(
         form_event_map,
         repeating_form_event_map=repeating_form_events,
         repeating_events=repeating_event_names,
+        additional_contexts_by_form=additional_contexts_by_form,
     )
     direct_values_by_context, checkbox_values_by_context = value_maps_by_context(field_values)
     sections: list[FormSectionModel] = []
@@ -317,6 +319,7 @@ def form_contexts_by_form(
     *,
     repeating_form_event_map: dict[str, set[str]] | None = None,
     repeating_events: set[str] | None = None,
+    additional_contexts_by_form: dict[str, list[tuple[str, str, str]]] | None = None,
 ) -> dict[str, list[tuple[str, str, str]]]:
     value_list = list(values)
     repeating_form_event_map = repeating_form_event_map or {}
@@ -368,6 +371,8 @@ def form_contexts_by_form(
                 continue
             if not value_instance and not form_repeats_here and not event_repeats_here:
                 append_context(form_contexts, value_event, "", "")
+        for event_id, repeat_instrument, instance in (additional_contexts_by_form or {}).get(form_name, []):
+            append_context(form_contexts, event_id, repeat_instrument, instance)
         if not form_contexts:
             if not mapped_events:
                 form_contexts.append(("", "", ""))

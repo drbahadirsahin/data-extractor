@@ -276,6 +276,28 @@ class DataEntryFormModelTests(unittest.TestCase):
             ],
         )
 
+    def test_additional_repeat_contexts_create_blank_sections_on_demand(self) -> None:
+        detail = RecordDetail(project_id="17", record="1")
+        fields = {
+            "tan_laboratuvar_sonucu": [FieldSpec("psa", "tan_laboratuvar_sonucu", "text", "PSA")],
+        }
+
+        model = build_form_render_model(
+            detail,
+            fields,
+            form_event_map={"tan_laboratuvar_sonucu": ["event_1"]},
+            repeating_form_event_map={"tan_laboratuvar_sonucu": ["event_1"]},
+            additional_contexts_by_form={
+                "tan_laboratuvar_sonucu": [("event_1", "tan_laboratuvar_sonucu", "1")]
+            },
+        )
+
+        self.assertEqual(len(model.sections), 1)
+        self.assertEqual(model.sections[0].event_id, "event_1")
+        self.assertEqual(model.sections[0].repeat_instrument, "tan_laboratuvar_sonucu")
+        self.assertEqual(model.sections[0].instance, "1")
+        self.assertFalse(model.sections[0].fields[0].present)
+
     def test_maps_readonly_and_descriptive_fields(self) -> None:
         detail = RecordDetail(
             project_id="17",

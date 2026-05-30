@@ -351,6 +351,24 @@ QListWidget#DataEntryRecordList::item:selected {
     color: #0f766e;
 }
 
+QListWidget#DataEntryRepeatOptionList {
+    background: #ffffff;
+    border: 1px solid #ded8cd;
+    border-radius: 8px;
+    padding: 8px;
+}
+
+QListWidget#DataEntryRepeatOptionList::item {
+    padding: 10px 12px;
+    border-radius: 7px;
+    font-weight: 650;
+}
+
+QListWidget#DataEntryRepeatOptionList::item:selected {
+    background: #102027;
+    color: #ffffff;
+}
+
 QWidget#DataEntryForm {
     background: transparent;
 }

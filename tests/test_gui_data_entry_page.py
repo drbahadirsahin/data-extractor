@@ -16,7 +16,9 @@ from gui.data_entry_page import (
     build_data_entry_ai_config,
     data_entry_store_path,
     merged_override_payload,
+    repeat_context_options,
 )
+from data_entry_form_model import FormFieldModel, FormRenderModel, FormSectionModel
 from project_config import ProjectConfig
 from settings_store import AppSettings, RedcapProjectToken
 
@@ -325,6 +327,61 @@ class GuiDataEntryPageTests(unittest.TestCase):
         self.assertEqual(scoped.llm["provider"], "llm_gateway")
         self.assertEqual(scoped.form_overrides["hasta_bilgileri"]["selection_rule"], "latest")
         self.assertEqual(scoped.field_overrides["hasta_ad"]["max_candidates"], 1)
+
+    def test_repeat_context_options_include_repeating_events_and_forms(self) -> None:
+        config = ProjectConfig(
+            project_name="Demo",
+            project_id="17",
+            dictionary_path="dictionary.csv",
+            form_labels={
+                "hasta_bilgileri": "Hasta Bilgileri",
+                "tan_laboratuvar_sonucu": "Tanı Laboratuvar Sonucu",
+            },
+            event_labels={
+                "klasik_biyopsi_arm_1": "Klasik Biyopsi",
+                "tbbi_bilgiler__tan_arm_1": "Tıbbi Bilgiler & Tanı",
+            },
+            form_event_map={
+                "hasta_bilgileri": ["klasik_biyopsi_arm_1"],
+                "tan_laboratuvar_sonucu": ["tbbi_bilgiler__tan_arm_1"],
+            },
+            repeating_events=["klasik_biyopsi_arm_1"],
+            repeating_form_event_map={"tan_laboratuvar_sonucu": ["tbbi_bilgiler__tan_arm_1"]},
+        )
+        bundle = SimpleNamespace(
+            config=config,
+            grouped_fields={
+                "hasta_bilgileri": [SimpleNamespace(field_name="hasta_ad")],
+                "tan_laboratuvar_sonucu": [SimpleNamespace(field_name="psa")],
+            },
+        )
+        model = FormRenderModel(
+            project_id="17",
+            record="1",
+            title="Record 1",
+            sections=[
+                FormSectionModel(
+                    form_name="hasta_bilgileri",
+                    title="Hasta Bilgileri",
+                    event_id="klasik_biyopsi_arm_1",
+                    instance="1",
+                    fields=[FormFieldModel("hasta_ad", "hasta_bilgileri", "Hasta Adı", "text")],
+                ),
+                FormSectionModel(
+                    form_name="tan_laboratuvar_sonucu",
+                    title="Tanı Laboratuvar Sonucu",
+                    event_id="tbbi_bilgiler__tan_arm_1",
+                    repeat_instrument="tan_laboratuvar_sonucu",
+                    instance="2",
+                    fields=[FormFieldModel("psa", "tan_laboratuvar_sonucu", "PSA", "text")],
+                ),
+            ],
+        )
+
+        labels = [option["label"] for option in repeat_context_options(model, bundle, "tr")]
+
+        self.assertIn("Event: Klasik Biyopsi #2", labels)
+        self.assertIn("Form: Tıbbi Bilgiler & Tanı / Tanı Laboratuvar Sonucu #3", labels)
 
 
 def build_runtime(app_home: Path, config_path: Path):

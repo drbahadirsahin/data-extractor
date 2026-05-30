@@ -109,6 +109,7 @@ class ClinicalDataEntryPage:
         self.browser = DataEntryRecordBrowser(self.store)
         self.bundle: WorkspaceBundle | None = None
         self.current_model = None
+        self.extra_repeat_contexts: dict[str, list[tuple[str, str, str]]] = {}
         self._sync_thread: QThread | None = None
         self._sync_worker: DataEntrySyncWorker | None = None
         self._ai_thread: QThread | None = None
@@ -204,6 +205,10 @@ class ClinicalDataEntryPage:
         self.ai_fill_button.setProperty("secondary", True)
         self.ai_fill_button.clicked.connect(self.fill_current_form_with_ai)
         self.ai_fill_button.setEnabled(False)
+        self.add_repeat_button = QPushButton(tr("data_entry_add_repeat", self.language))
+        self.add_repeat_button.setProperty("secondary", True)
+        self.add_repeat_button.clicked.connect(self.add_repeat_context)
+        self.add_repeat_button.setEnabled(False)
         self.save_button = QPushButton(tr("data_entry_save_local", self.language))
         self.save_button.setProperty("secondary", True)
         self.save_button.clicked.connect(lambda: self.save_current_record(send=False))
@@ -212,6 +217,7 @@ class ClinicalDataEntryPage:
         self.send_button.clicked.connect(lambda: self.save_current_record(send=True))
         self.send_button.setEnabled(False)
         action_row.addWidget(self.ai_fill_button)
+        action_row.addWidget(self.add_repeat_button)
         action_row.addStretch(1)
         action_row.addWidget(self.save_button)
         action_row.addWidget(self.send_button)
@@ -226,6 +232,7 @@ class ClinicalDataEntryPage:
     def set_form_actions_enabled(self, enabled: bool) -> None:
         enabled = bool(enabled)
         self.ai_fill_button.setEnabled(enabled and self._ai_thread is None)
+        self.add_repeat_button.setEnabled(enabled)
         self.save_button.setEnabled(enabled)
         self.send_button.setEnabled(enabled)
 
@@ -275,7 +282,7 @@ class ClinicalDataEntryPage:
                 token = self.runtime.secrets_store.get(project.token_secret_name)
                 if token and project_config_needs_server_metadata(config_path):
                     ensure_server_metadata_in_config(config_path, api_url=project.api_url, api_token=token)
-                bundle = load_workspace_bundle(config_path)
+                bundle = load_workspace_bundle(config_path, data_entry=True)
             except Exception as exc:
                 self.status_label.setText(tr("data_entry_metadata_failed", self.language, error=str(exc)))
                 return None
@@ -289,6 +296,7 @@ class ClinicalDataEntryPage:
         project = current_redcap_project_token(self.runtime.settings)
         self.record_list.clear()
         self.current_model = None
+        self.extra_repeat_contexts = {}
         self.set_form_actions_enabled(False)
         if project is None:
             return
@@ -334,6 +342,7 @@ class ClinicalDataEntryPage:
             return
         record = str(current.data(Qt.ItemDataRole.UserRole))
         try:
+            self.extra_repeat_contexts = {}
             detail = self.browser.get_record_detail(project.project_id, record)
             model = build_form_render_model(
                 detail,
@@ -344,6 +353,7 @@ class ClinicalDataEntryPage:
                 repeating_forms=self.bundle.config.repeating_forms,
                 repeating_form_event_map=self.bundle.config.repeating_form_event_map,
                 repeating_events=self.bundle.config.repeating_events,
+                additional_contexts_by_form=self.extra_repeat_contexts,
                 title=tr("data_entry_record_title", self.language, record=record),
             )
         except Exception as exc:
@@ -403,6 +413,7 @@ class ClinicalDataEntryPage:
             dag_unique_name=project.data_access_group_unique_name,
             dirty=True,
         )
+        self.extra_repeat_contexts = {}
         self.current_model = build_form_render_model(
             detail,
             self.bundle.grouped_fields,
@@ -412,6 +423,7 @@ class ClinicalDataEntryPage:
             repeating_forms=self.bundle.config.repeating_forms,
             repeating_form_event_map=self.bundle.config.repeating_form_event_map,
             repeating_events=self.bundle.config.repeating_events,
+            additional_contexts_by_form=self.extra_repeat_contexts,
             title=tr("data_entry_record_title", self.language, record=record_id),
         )
         self.form_widget.set_model(self.current_model)
@@ -594,6 +606,63 @@ class ClinicalDataEntryPage:
             return
         applied = self.form_widget.apply_values(values, field_names=field_names)
         self.status_label.setText(tr("data_entry_ai_fill_done", self.language, count=applied))
+
+    def add_repeat_context(self) -> None:
+        if self.current_model is None:
+            return
+        if self.bundle is None:
+            self.status_label.setText(tr("data_entry_metadata_missing", self.language))
+            return
+        options = repeat_context_options(self.current_model, self.bundle, self.language)
+        if not options:
+            self.status_label.setText(tr("data_entry_repeat_no_options", self.language))
+            return
+        option = prompt_repeat_context(self.widget, options, self.language)
+        if option is None:
+            return
+        current_values = self.form_widget.collect_values(include_hidden=True)
+        contexts = contexts_for_repeat_option(option, self.bundle)
+        for form_name, context in contexts.items():
+            bucket = self.extra_repeat_contexts.setdefault(form_name, [])
+            if context not in bucket:
+                bucket.append(context)
+        self.rebuild_current_record_model(preserve_values=current_values, select_context=option["select_context"])
+        self.status_label.setText(tr("data_entry_repeat_added", self.language, label=option["label"]))
+
+    def rebuild_current_record_model(
+        self,
+        *,
+        preserve_values: dict[str, Any] | None = None,
+        select_context: tuple[str, str, str, str] | None = None,
+    ) -> None:
+        project = current_redcap_project_token(self.runtime.settings)
+        if project is None or self.current_model is None or self.bundle is None:
+            return
+        record = self.current_model.record
+        detail = self.browser.get_record_detail(project.project_id, record)
+        self.current_model = build_form_render_model(
+            detail,
+            self.bundle.grouped_fields,
+            form_labels=self.bundle.config.form_labels,
+            event_labels=self.bundle.config.event_labels,
+            form_event_map=self.bundle.config.form_event_map,
+            repeating_forms=self.bundle.config.repeating_forms,
+            repeating_form_event_map=self.bundle.config.repeating_form_event_map,
+            repeating_events=self.bundle.config.repeating_events,
+            additional_contexts_by_form=self.extra_repeat_contexts,
+            title=tr("data_entry_record_title", self.language, record=record),
+        )
+        self.form_widget.set_model(self.current_model)
+        if preserve_values:
+            render_sections_for_preserved_values(self.form_widget, self.current_model, preserve_values)
+            self.form_widget.apply_values(preserve_values, field_names=set(preserve_values))
+        if select_context is not None:
+            for index, section in enumerate(self.current_model.sections):
+                context = (section.form_name, section.event_id, section.repeat_instrument, section.instance)
+                if context == select_context:
+                    self.form_widget.select_section(index)
+                    break
+        self.set_form_actions_enabled(True)
 
     @Slot(str)
     def handle_ai_fill_failure(self, error: str) -> None:
@@ -825,6 +894,167 @@ def redcap_repeat_instrument_for_change(change: dict[str, Any], field: Any, bund
             return form_name
     repeating_forms = set(bundle.config.repeating_forms or [])
     return form_name if form_name in repeating_forms and event_name not in set(bundle.config.repeating_events or []) else ""
+
+
+def render_sections_for_preserved_values(form_widget: Any, model: Any, values: dict[str, Any]) -> None:
+    keys = {str(key) for key in values}
+    for section_index, section in enumerate(getattr(model, "sections", []) or []):
+        if any((field.context_key or field.field_name) in keys for field in getattr(section, "fields", []) or []):
+            form_widget.render_section_at(section_index)
+
+
+def repeat_context_options(model: Any, bundle: WorkspaceBundle, language: str) -> list[dict[str, Any]]:
+    options: list[dict[str, Any]] = []
+    form_event_map = bundle.config.form_event_map or {}
+    form_labels = bundle.config.form_labels or {}
+    event_labels = bundle.config.event_labels or {}
+    grouped_fields = bundle.grouped_fields or {}
+    for event_id in bundle.config.repeating_events or []:
+        event_key = str(event_id)
+        event_forms = [
+            form_name
+            for form_name in grouped_fields
+            if event_key in {str(item) for item in form_event_map.get(form_name, [])}
+        ]
+        if not event_forms:
+            continue
+        instance = str(next_event_instance(model, event_key))
+        event_label = event_labels.get(event_key) or event_key
+        contexts = {
+            form_name: (event_key, "", instance)
+            for form_name in event_forms
+        }
+        options.append(
+            {
+                "kind": "event",
+                "label": tr("data_entry_repeat_event_option", language, event=event_label, instance=instance),
+                "contexts_by_form": contexts,
+                "select_context": (event_forms[0], event_key, "", instance),
+            }
+        )
+    repeating_form_events = repeating_form_events_for_options(bundle)
+    for form_name in grouped_fields:
+        events = repeating_form_events.get(form_name, [])
+        if not events:
+            continue
+        form_label = form_labels.get(form_name) or form_name
+        for event_id in events:
+            event_key = str(event_id)
+            instance = str(next_form_instance(model, form_name, event_key))
+            event_label = event_labels.get(event_key) or event_key or tr("data_entry_event_unspecified", language)
+            options.append(
+                {
+                    "kind": "form",
+                    "label": tr(
+                        "data_entry_repeat_form_option",
+                        language,
+                        event=event_label,
+                        form=form_label,
+                        instance=instance,
+                    ),
+                    "contexts_by_form": {
+                        form_name: (event_key, form_name, instance),
+                    },
+                    "select_context": (form_name, event_key, form_name, instance),
+                }
+            )
+    return options
+
+
+def repeating_form_events_for_options(bundle: WorkspaceBundle) -> dict[str, list[str]]:
+    configured = bundle.config.repeating_form_event_map or {}
+    if configured:
+        return {
+            str(form_name): [str(event_id) for event_id in events or []]
+            for form_name, events in configured.items()
+        }
+    form_event_map = bundle.config.form_event_map or {}
+    return {
+        str(form_name): [str(event_id) for event_id in form_event_map.get(str(form_name), [])]
+        for form_name in bundle.config.repeating_forms or []
+    }
+
+
+def next_event_instance(model: Any, event_id: str) -> int:
+    instances = [
+        numeric_instance(getattr(section, "instance", ""))
+        for section in getattr(model, "sections", []) or []
+        if str(getattr(section, "event_id", "")) == str(event_id)
+        and not str(getattr(section, "repeat_instrument", ""))
+    ]
+    return max(instances or [0]) + 1
+
+
+def next_form_instance(model: Any, form_name: str, event_id: str) -> int:
+    instances = [
+        numeric_instance(getattr(section, "instance", ""))
+        for section in getattr(model, "sections", []) or []
+        if str(getattr(section, "form_name", "")) == str(form_name)
+        and str(getattr(section, "event_id", "")) == str(event_id)
+        and str(getattr(section, "repeat_instrument", "")) == str(form_name)
+    ]
+    return max(instances or [0]) + 1
+
+
+def numeric_instance(value: Any) -> int:
+    try:
+        return int(str(value or "0"))
+    except ValueError:
+        return 0
+
+
+def contexts_for_repeat_option(option: dict[str, Any], bundle: WorkspaceBundle) -> dict[str, tuple[str, str, str]]:
+    contexts = option.get("contexts_by_form")
+    if isinstance(contexts, dict):
+        return {
+            str(form_name): tuple(context)  # type: ignore[arg-type]
+            for form_name, context in contexts.items()
+        }
+    return {}
+
+
+def prompt_repeat_context(parent: Any, options: list[dict[str, Any]], language: str) -> dict[str, Any] | None:
+    from PySide6.QtWidgets import QDialog, QDialogButtonBox, QLabel, QListWidget, QListWidgetItem, QVBoxLayout
+
+    dialog = QDialog(parent)
+    dialog.setWindowTitle(tr("data_entry_repeat_dialog_title", language))
+    dialog.setMinimumSize(560, 420)
+    layout = QVBoxLayout(dialog)
+    layout.setContentsMargins(16, 16, 16, 16)
+    layout.setSpacing(10)
+    title = QLabel(tr("data_entry_repeat_dialog_title", language))
+    title.setObjectName("TitleLabel")
+    layout.addWidget(title)
+    body = QLabel(tr("data_entry_repeat_dialog_body", language))
+    body.setObjectName("MutedLabel")
+    body.setWordWrap(True)
+    layout.addWidget(body)
+    list_widget = QListWidget()
+    list_widget.setObjectName("DataEntryRepeatOptionList")
+    for index, option in enumerate(options):
+        item = QListWidgetItem(str(option.get("label") or ""))
+        item.setData(Qt.ItemDataRole.UserRole, index)
+        list_widget.addItem(item)
+    if options:
+        list_widget.setCurrentRow(0)
+    layout.addWidget(list_widget, 1)
+    buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+    ok_button = buttons.button(QDialogButtonBox.StandardButton.Ok)
+    if ok_button is not None:
+        ok_button.setText(tr("data_entry_repeat_add_button", language))
+    cancel_button = buttons.button(QDialogButtonBox.StandardButton.Cancel)
+    if cancel_button is not None:
+        cancel_button.setText(tr("cancel_button", language))
+    buttons.accepted.connect(dialog.accept)
+    buttons.rejected.connect(dialog.reject)
+    layout.addWidget(buttons)
+    if dialog.exec() != QDialog.DialogCode.Accepted:
+        return None
+    item = list_widget.currentItem()
+    if item is None:
+        return None
+    index = int(item.data(Qt.ItemDataRole.UserRole))
+    return options[index]
 
 
 def prompt_ai_fill_options(

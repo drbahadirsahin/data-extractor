@@ -75,6 +75,18 @@ class WorkspaceFlowTests(unittest.TestCase):
                     "Text Validation Max": "",
                     "Field Annotation": "",
                 },
+                {
+                    "Variable / Field Name": "vki",
+                    "Form Name": "hasta_bilgileri",
+                    "Field Type": "calc",
+                    "Field Label": "VKİ",
+                    "Choices, Calculations, OR Slider Labels": "round(([kilo]/(([boy]/100)^2)),1)",
+                    "Field Note": "",
+                    "Text Validation Type OR Show Slider Number": "",
+                    "Text Validation Min": "",
+                    "Text Validation Max": "",
+                    "Field Annotation": "",
+                },
             ]
             with dictionary_path.open("w", encoding="utf-8", newline="") as handle:
                 writer = csv.DictWriter(handle, fieldnames=headers)
@@ -133,8 +145,13 @@ class WorkspaceFlowTests(unittest.TestCase):
             self.assertEqual(bundle.config.dictionary_path, str(dictionary_path.resolve()))
             self.assertNotIn("tc_no", bundle.all_field_names)
             self.assertNotIn("gizli_alan", bundle.all_field_names)
+            self.assertNotIn("vki", bundle.all_field_names)
             self.assertEqual(bundle.grouped_fields["hasta_bilgileri"][0].post_processing, [["limit_output_length", 2]])
             self.assertEqual(bundle.grouped_fields["hasta_bilgileri"][0].max_candidates, 7)
+
+            data_entry_bundle = load_workspace_bundle(config_path, data_entry=True)
+            self.assertIn("vki", data_entry_bundle.all_field_names)
+            self.assertNotIn("gizli_alan", data_entry_bundle.all_field_names)
 
             fields = get_fields_for_forms(bundle, {"laboratuvar"})
             self.assertEqual([field.field_name for field in fields], ["lab_psa"])

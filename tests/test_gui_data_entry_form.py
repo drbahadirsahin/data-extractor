@@ -10,7 +10,7 @@ from data_entry_form_model import (
     FormRenderModel,
     FormSectionModel,
 )
-from gui.data_entry_form import DataEntryFormWidget
+from gui.data_entry_form import DataEntryFormWidget, DataEntryNavButton
 
 
 def get_qapplication():
@@ -193,10 +193,10 @@ class GuiDataEntryFormTests(unittest.TestCase):
                 ],
             )
         )
-        from PySide6.QtWidgets import QPushButton, QScrollArea, QStackedWidget
+        from PySide6.QtWidgets import QScrollArea, QStackedWidget
 
         form_nav = form.widget.findChild(QScrollArea, "DataEntryFormNavScroll")
-        nav_buttons = form.widget.findChildren(QPushButton, "DataEntryFormNavButton")
+        nav_buttons = form.widget.findChildren(DataEntryNavButton, "DataEntryFormNavButton")
         form_stack = form.widget.findChild(QStackedWidget, "DataEntryFormStack")
 
         self.assertIsNotNone(form_nav)
@@ -247,10 +247,10 @@ class GuiDataEntryFormTests(unittest.TestCase):
                 ],
             )
         )
-        from PySide6.QtWidgets import QLabel, QPushButton
+        from PySide6.QtWidgets import QLabel
 
         event_labels = form.widget.findChildren(QLabel, "DataEntryFormNavEvent")
-        nav_buttons = form.widget.findChildren(QPushButton, "DataEntryFormNavButton")
+        nav_buttons = form.widget.findChildren(DataEntryNavButton, "DataEntryFormNavButton")
 
         self.assertEqual([item.text() for item in event_labels], ["Başlangıç", "İzlem"])
         self.assertEqual(nav_buttons[0].text(), "Hasta Bilgileri")
@@ -287,10 +287,10 @@ class GuiDataEntryFormTests(unittest.TestCase):
                 ],
             )
         )
-        from PySide6.QtWidgets import QLabel, QPushButton
+        from PySide6.QtWidgets import QLabel
 
         event_labels = form.widget.findChildren(QLabel, "DataEntryFormNavEvent")
-        nav_buttons = form.widget.findChildren(QPushButton, "DataEntryFormNavButton")
+        nav_buttons = form.widget.findChildren(DataEntryNavButton, "DataEntryFormNavButton")
 
         self.assertEqual([item.text() for item in event_labels], ["Başlangıç"])
         self.assertEqual(nav_buttons[0].text(), "Tanı Laboratuvar Sonucu #1\n1/1 alan dolu")
@@ -358,16 +358,20 @@ class GuiDataEntryFormTests(unittest.TestCase):
             ],
             repeat_action_handler=lambda option: triggered.append(option),
         )
-        from PySide6.QtWidgets import QPushButton
+        from PySide6.QtWidgets import QPushButton, QToolButton
 
         panel_buttons = form.widget.findChildren(QPushButton, "DataEntryRepeatPanelButton")
-        inline_buttons = form.widget.findChildren(QPushButton, "DataEntryFormNavInlineAdd")
-        event_buttons = form.widget.findChildren(QPushButton, "DataEntryFormNavEventAdd")
+        inline_buttons = form.widget.findChildren(QToolButton, "DataEntryFormNavInlineAdd")
+        event_buttons = form.widget.findChildren(QToolButton, "DataEntryFormNavEventAdd")
 
         self.assertEqual(panel_buttons, [])
         self.assertEqual(len(inline_buttons), 1)
+        self.assertEqual(inline_buttons[0].text(), "+")
+        self.assertEqual(inline_buttons[0].width(), 28)
         self.assertIn("#4", inline_buttons[0].toolTip())
         self.assertEqual(len(event_buttons), 1)
+        self.assertEqual(event_buttons[0].text(), "+")
+        self.assertEqual(event_buttons[0].width(), 28)
         self.assertIn("İzlem", event_buttons[0].toolTip())
         inline_buttons[0].click()
         event_buttons[0].click()
@@ -574,9 +578,7 @@ class GuiDataEntryFormTests(unittest.TestCase):
             )
         )
 
-        from PySide6.QtWidgets import QPushButton
-
-        nav_buttons = form.widget.findChildren(QPushButton, "DataEntryFormNavButton")
+        nav_buttons = form.widget.findChildren(DataEntryNavButton, "DataEntryFormNavButton")
         nav_buttons[1].click()
         values = form.collect_values()
 

@@ -3,6 +3,9 @@ from __future__ import annotations
 import re
 from typing import Any, Callable
 
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtWidgets import QFrame, QLabel, QVBoxLayout
+
 from data_entry_form_model import (
     CHECKBOX_EDITOR,
     DATE_EDITOR,
@@ -18,6 +21,54 @@ from data_entry_form_model import (
 )
 from gui.i18n import tr
 from redcap_calc import evaluate_redcap_calc
+
+
+class DataEntryNavButton(QFrame):
+    clicked = Signal()
+
+    def __init__(self, text: str, *, parent: Any | None = None) -> None:
+        super().__init__(parent)
+        self._checked = False
+        self._text = str(text or "")
+        self.setObjectName("DataEntryFormNavButton")
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(0)
+        self.label = QLabel(self._text)
+        self.label.setObjectName("DataEntryFormNavButtonLabel")
+        self.label.setWordWrap(True)
+        layout.addWidget(self.label)
+
+    def text(self) -> str:
+        return self._text
+
+    def setCheckable(self, _checkable: bool) -> None:
+        return
+
+    def setChecked(self, checked: bool) -> None:
+        self._checked = bool(checked)
+        self.setProperty("active", self._checked)
+        repolish(self)
+        repolish(self.label)
+
+    def isChecked(self) -> bool:
+        return self._checked
+
+    def click(self) -> None:
+        self.clicked.emit()
+
+    def mouseReleaseEvent(self, event: Any) -> None:
+        if event.button() == Qt.MouseButton.LeftButton and self.rect().contains(event.position().toPoint()):
+            self.clicked.emit()
+        super().mouseReleaseEvent(event)
+
+    def keyPressEvent(self, event: Any) -> None:
+        if event.key() in {Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Space}:
+            self.clicked.emit()
+            return
+        super().keyPressEvent(event)
 
 
 class DataEntryFormWidget:
@@ -58,8 +109,8 @@ class DataEntryFormWidget:
             QFrame,
             QHBoxLayout,
             QLabel,
-            QPushButton,
             QScrollArea,
+            QSizePolicy,
             QStackedWidget,
             QVBoxLayout,
             QWidget,
@@ -101,6 +152,8 @@ class DataEntryFormWidget:
 
             nav_body = QWidget()
             nav_body.setObjectName("DataEntryFormNav")
+            nav_body.setMinimumWidth(0)
+            nav_body.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
             nav_layout = QVBoxLayout(nav_body)
             nav_layout.setContentsMargins(8, 8, 8, 8)
             nav_layout.setSpacing(6)
@@ -125,14 +178,22 @@ class DataEntryFormWidget:
                         )
                     )
                     event_items.add(event_key)
-                button = QPushButton(wrap_nav_title(nav_title_for_section(section, include_event=not has_event_groups)))
+                inline_action = self.repeat_action_for_section(section)
+                nav_wrap_width = 20 if inline_action is not None else 30
+                button = DataEntryNavButton(
+                    wrap_nav_title(
+                        nav_title_for_section(section, include_event=not has_event_groups),
+                        width=nav_wrap_width,
+                    )
+                )
                 button.setObjectName("DataEntryFormNavButton")
                 button.setToolTip(section_tooltip(section))
                 button.setCheckable(True)
                 button.setProperty("section_index", section_index)
                 button.setMinimumHeight(nav_button_height(button.text()))
+                button.setMinimumWidth(0)
+                button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
                 button.clicked.connect(lambda _checked=False, index=section_index: self.select_section(index))
-                inline_action = self.repeat_action_for_section(section)
                 if inline_action is None:
                     nav_layout.addWidget(button)
                 else:
@@ -159,39 +220,46 @@ class DataEntryFormWidget:
         self.update_calculated_fields()
 
     def build_event_header(self, label_text: str, action: dict[str, Any] | None = None) -> Any:
-        from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton
+        from PySide6.QtCore import QSize
+        from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QToolButton
 
         row = QFrame()
         row.setObjectName("DataEntryFormNavEventRow")
+        row.setMinimumWidth(0)
         layout = QHBoxLayout(row)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(6)
         event_label = QLabel(label_text)
         event_label.setObjectName("DataEntryFormNavEvent")
         event_label.setWordWrap(True)
+        event_label.setMinimumWidth(0)
         layout.addWidget(event_label, 1)
         if action is not None:
-            add_button = QPushButton("+")
+            add_button = QToolButton()
+            add_button.setText("+")
             add_button.setObjectName("DataEntryFormNavEventAdd")
             add_button.setToolTip(str(action.get("label") or tr("data_entry_add_repeat", self.language)))
-            add_button.setFixedWidth(30)
+            add_button.setFixedSize(QSize(28, 28))
             add_button.clicked.connect(lambda _checked=False, option=action: self.trigger_repeat_action(option))
             layout.addWidget(add_button, 0)
         return row
 
     def build_nav_button_row(self, button: Any, action: dict[str, Any]) -> Any:
-        from PySide6.QtWidgets import QFrame, QHBoxLayout, QPushButton
+        from PySide6.QtCore import QSize
+        from PySide6.QtWidgets import QFrame, QHBoxLayout, QToolButton
 
         row = QFrame()
         row.setObjectName("DataEntryFormNavButtonRow")
+        row.setMinimumWidth(0)
         layout = QHBoxLayout(row)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(6)
         layout.addWidget(button, 1)
-        add_button = QPushButton("+")
+        add_button = QToolButton()
+        add_button.setText("+")
         add_button.setObjectName("DataEntryFormNavInlineAdd")
         add_button.setToolTip(str(action.get("label") or tr("data_entry_add_repeat", self.language)))
-        add_button.setFixedWidth(34)
+        add_button.setFixedSize(QSize(28, 28))
         add_button.clicked.connect(lambda _checked=False, option=action: self.trigger_repeat_action(option))
         layout.addWidget(add_button, 0)
         return row
@@ -936,7 +1004,7 @@ def wrap_nav_title(title: str, *, width: int = 30) -> str:
 
 def nav_button_height(text: str) -> int:
     line_count = max(1, len(str(text or "").splitlines()))
-    return max(42, 24 + (line_count * 18))
+    return max(48, 30 + (line_count * 22))
 
 
 def section_tooltip(section: Any) -> str:

@@ -381,25 +381,32 @@ QLabel#DataEntryFormNavEvent {
     padding: 8px 6px 4px 6px;
 }
 
-QPushButton#DataEntryFormNavButton {
+QFrame#DataEntryFormNavButton {
     background: #ffffff;
-    color: #334155;
     border: 1px solid transparent;
     border-radius: 7px;
-    padding: 9px 11px;
-    text-align: left;
+}
+
+QLabel#DataEntryFormNavButtonLabel {
+    color: #334155;
     font-weight: 650;
 }
 
-QPushButton#DataEntryFormNavButton:hover {
+QFrame#DataEntryFormNavButton:hover {
     background: #edf8f4;
+}
+
+QFrame#DataEntryFormNavButton:hover QLabel#DataEntryFormNavButtonLabel {
     color: #0f766e;
 }
 
-QPushButton#DataEntryFormNavButton[active="true"] {
+QFrame#DataEntryFormNavButton[active="true"] {
     background: #102027;
-    color: #ffffff;
     border: 1px solid #102027;
+}
+
+QFrame#DataEntryFormNavButton[active="true"] QLabel#DataEntryFormNavButtonLabel {
+    color: #ffffff;
 }
 
 QFrame#DataEntryFormNavButtonRow {
@@ -412,30 +419,42 @@ QFrame#DataEntryFormNavEventRow {
     padding-top: 4px;
 }
 
-QPushButton#DataEntryFormNavInlineAdd {
+QToolButton#DataEntryFormNavInlineAdd {
     background: #edf8f4;
     color: #0f766e;
     border: 1px solid #b7ded5;
-    border-radius: 7px;
-    font-size: 16px;
+    border-radius: 14px;
+    padding: 0;
+    margin: 0;
+    min-width: 28px;
+    max-width: 28px;
+    min-height: 28px;
+    max-height: 28px;
+    font-size: 17px;
     font-weight: 820;
 }
 
-QPushButton#DataEntryFormNavInlineAdd:hover {
+QToolButton#DataEntryFormNavInlineAdd:hover {
     background: #dff4ee;
     border: 1px solid #8fcfc2;
 }
 
-QPushButton#DataEntryFormNavEventAdd {
+QToolButton#DataEntryFormNavEventAdd {
     background: #102027;
     color: #ffffff;
     border: 1px solid #102027;
-    border-radius: 7px;
-    font-size: 15px;
+    border-radius: 14px;
+    padding: 0;
+    margin: 0;
+    min-width: 28px;
+    max-width: 28px;
+    min-height: 28px;
+    max-height: 28px;
+    font-size: 17px;
     font-weight: 820;
 }
 
-QPushButton#DataEntryFormNavEventAdd:hover {
+QToolButton#DataEntryFormNavEventAdd:hover {
     background: #0f766e;
     border: 1px solid #0f766e;
 }

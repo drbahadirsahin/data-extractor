@@ -84,7 +84,7 @@ class DataEntryFormWidget:
         header.setObjectName("DataEntryRecordTitle")
         header.setWordWrap(True)
         self.layout.addWidget(header)
-        if len(model.sections) > 1:
+        if len(model.sections) > 1 or self.repeat_actions:
             shell = QFrame()
             shell.setObjectName("DataEntryFormShell")
             shell_layout = QHBoxLayout(shell)
@@ -105,8 +105,6 @@ class DataEntryFormWidget:
             nav_layout.setContentsMargins(8, 8, 8, 8)
             nav_layout.setSpacing(6)
             form_nav.setWidget(nav_body)
-            if self.repeat_actions:
-                nav_layout.addWidget(self.build_repeat_action_panel())
 
             form_stack = QStackedWidget()
             form_stack.setObjectName("DataEntryFormStack")
@@ -116,10 +114,16 @@ class DataEntryFormWidget:
                 event_instance = "" if getattr(section, "repeat_instrument", "") else getattr(section, "instance", "")
                 event_key = (getattr(section, "event_id", ""), event_instance)
                 if has_event_groups and event_key not in event_items:
-                    event_label = QLabel(section.event_label or tr("data_entry_event_unspecified", self.language))
-                    event_label.setObjectName("DataEntryFormNavEvent")
-                    event_label.setWordWrap(True)
-                    nav_layout.addWidget(event_label)
+                    event_action = self.repeat_action_for_event_header(
+                        getattr(section, "event_id", ""),
+                        event_instance,
+                    )
+                    nav_layout.addWidget(
+                        self.build_event_header(
+                            section.event_label or tr("data_entry_event_unspecified", self.language),
+                            event_action,
+                        )
+                    )
                     event_items.add(event_key)
                 button = QPushButton(wrap_nav_title(nav_title_for_section(section, include_event=not has_event_groups)))
                 button.setObjectName("DataEntryFormNavButton")
@@ -149,31 +153,31 @@ class DataEntryFormWidget:
             self.layout.addWidget(shell, 1)
             self.select_section(first_index)
         else:
-            if self.repeat_actions:
-                self.layout.addWidget(self.build_repeat_action_panel())
             for section in model.sections:
                 self.layout.addWidget(self.build_section_scroll(section), 1)
         self.update_branching_visibility()
         self.update_calculated_fields()
 
-    def build_repeat_action_panel(self) -> Any:
-        from PySide6.QtWidgets import QFrame, QLabel, QPushButton, QVBoxLayout
+    def build_event_header(self, label_text: str, action: dict[str, Any] | None = None) -> Any:
+        from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton
 
-        panel = QFrame()
-        panel.setObjectName("DataEntryRepeatPanel")
-        layout = QVBoxLayout(panel)
-        layout.setContentsMargins(10, 10, 10, 10)
+        row = QFrame()
+        row.setObjectName("DataEntryFormNavEventRow")
+        layout = QHBoxLayout(row)
+        layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(6)
-        title = QLabel(tr("data_entry_repeat_panel_title", self.language))
-        title.setObjectName("DataEntryRepeatPanelTitle")
-        layout.addWidget(title)
-        for action in self.repeat_actions:
-            button = QPushButton(repeat_action_button_text(action))
-            button.setObjectName("DataEntryRepeatPanelButton")
-            button.setToolTip(str(action.get("label") or ""))
-            button.clicked.connect(lambda _checked=False, option=action: self.trigger_repeat_action(option))
-            layout.addWidget(button)
-        return panel
+        event_label = QLabel(label_text)
+        event_label.setObjectName("DataEntryFormNavEvent")
+        event_label.setWordWrap(True)
+        layout.addWidget(event_label, 1)
+        if action is not None:
+            add_button = QPushButton("+")
+            add_button.setObjectName("DataEntryFormNavEventAdd")
+            add_button.setToolTip(str(action.get("label") or tr("data_entry_add_repeat", self.language)))
+            add_button.setFixedWidth(30)
+            add_button.clicked.connect(lambda _checked=False, option=action: self.trigger_repeat_action(option))
+            layout.addWidget(add_button, 0)
+        return row
 
     def build_nav_button_row(self, button: Any, action: dict[str, Any]) -> Any:
         from PySide6.QtWidgets import QFrame, QHBoxLayout, QPushButton
@@ -200,8 +204,51 @@ class DataEntryFormWidget:
                 continue
             if str(action.get("event_id") or "") != str(getattr(section, "event_id", "") or ""):
                 continue
+            if not self.section_is_latest_repeat_form_instance(section):
+                continue
             return action
         return None
+
+    def repeat_action_for_event_header(self, event_id: str, event_instance: str) -> dict[str, Any] | None:
+        for action in self.repeat_actions:
+            if str(action.get("kind") or "") != "event":
+                continue
+            if str(action.get("event_id") or "") != str(event_id or ""):
+                continue
+            latest_instance = self.latest_event_instance(event_id)
+            if latest_instance <= 0 and not str(event_instance or ""):
+                return action
+            if latest_instance > 0 and numeric_instance_value(event_instance) == latest_instance:
+                return action
+        return None
+
+    def section_is_latest_repeat_form_instance(self, section: Any) -> bool:
+        form_name = str(getattr(section, "form_name", "") or "")
+        event_id = str(getattr(section, "event_id", "") or "")
+        repeat_instrument = str(getattr(section, "repeat_instrument", "") or "")
+        instance = numeric_instance_value(getattr(section, "instance", ""))
+        if not form_name or repeat_instrument != form_name or instance <= 0:
+            return False
+        latest = 0
+        for candidate in getattr(self.model, "sections", []) if self.model is not None else []:
+            if str(getattr(candidate, "form_name", "") or "") != form_name:
+                continue
+            if str(getattr(candidate, "event_id", "") or "") != event_id:
+                continue
+            if str(getattr(candidate, "repeat_instrument", "") or "") != form_name:
+                continue
+            latest = max(latest, numeric_instance_value(getattr(candidate, "instance", "")))
+        return instance == latest
+
+    def latest_event_instance(self, event_id: str) -> int:
+        latest = 0
+        for section in getattr(self.model, "sections", []) if self.model is not None else []:
+            if str(getattr(section, "event_id", "") or "") != str(event_id or ""):
+                continue
+            if str(getattr(section, "repeat_instrument", "") or ""):
+                continue
+            latest = max(latest, numeric_instance_value(getattr(section, "instance", "")))
+        return latest
 
     def trigger_repeat_action(self, option: dict[str, Any]) -> None:
         if self.repeat_action_handler is not None:
@@ -905,13 +952,6 @@ def section_display_title(section: Any) -> str:
     return title
 
 
-def repeat_action_button_text(action: dict[str, Any]) -> str:
-    button_label = str(action.get("button_label") or "").strip()
-    if button_label:
-        return button_label
-    return str(action.get("label") or "").strip()
-
-
 def first_section_with_values(sections: list[Any]) -> int:
     for index, section in enumerate(sections):
         if section_filled_count(section) > 0:
@@ -931,6 +971,13 @@ def section_filled_count(section: Any) -> int:
         if str(field.value or "") != "":
             count += 1
     return count
+
+
+def numeric_instance_value(value: Any) -> int:
+    try:
+        return int(str(value or "0"))
+    except ValueError:
+        return 0
 
 
 def configure_line_edit_validation(editor: Any, field: FormFieldModel) -> None:

@@ -317,6 +317,24 @@ class GuiDataEntryFormTests(unittest.TestCase):
                         fields=[FormFieldModel("psa", "tan_laboratuvar_sonucu", "PSA", "text", "4.2")],
                     ),
                     FormSectionModel(
+                        form_name="tan_laboratuvar_sonucu",
+                        title="Tanı Laboratuvar Sonucu",
+                        event_id="baseline_arm_1",
+                        event_label="Başlangıç",
+                        repeat_instrument="tan_laboratuvar_sonucu",
+                        instance="2",
+                        fields=[FormFieldModel("psa", "tan_laboratuvar_sonucu", "PSA", "text", "5.1")],
+                    ),
+                    FormSectionModel(
+                        form_name="tan_laboratuvar_sonucu",
+                        title="Tanı Laboratuvar Sonucu",
+                        event_id="baseline_arm_1",
+                        event_label="Başlangıç",
+                        repeat_instrument="tan_laboratuvar_sonucu",
+                        instance="3",
+                        fields=[FormFieldModel("psa", "tan_laboratuvar_sonucu", "PSA", "text", "6.3")],
+                    ),
+                    FormSectionModel(
                         form_name="hasta_bilgileri",
                         title="Hasta Bilgileri",
                         event_id="followup_arm_1",
@@ -330,14 +348,12 @@ class GuiDataEntryFormTests(unittest.TestCase):
                     "kind": "event",
                     "event_id": "followup_arm_1",
                     "label": "Event: İzlem #2",
-                    "button_label": "+ İzlem",
                 },
                 {
                     "kind": "form",
                     "form_name": "tan_laboratuvar_sonucu",
                     "event_id": "baseline_arm_1",
-                    "label": "Form: Başlangıç / Tanı Laboratuvar Sonucu #2",
-                    "button_label": "+ Tanı Laboratuvar Sonucu",
+                    "label": "Form: Başlangıç / Tanı Laboratuvar Sonucu #4",
                 },
             ],
             repeat_action_handler=lambda option: triggered.append(option),
@@ -346,11 +362,16 @@ class GuiDataEntryFormTests(unittest.TestCase):
 
         panel_buttons = form.widget.findChildren(QPushButton, "DataEntryRepeatPanelButton")
         inline_buttons = form.widget.findChildren(QPushButton, "DataEntryFormNavInlineAdd")
+        event_buttons = form.widget.findChildren(QPushButton, "DataEntryFormNavEventAdd")
 
-        self.assertEqual([button.text() for button in panel_buttons], ["+ İzlem", "+ Tanı Laboratuvar Sonucu"])
+        self.assertEqual(panel_buttons, [])
         self.assertEqual(len(inline_buttons), 1)
+        self.assertIn("#4", inline_buttons[0].toolTip())
+        self.assertEqual(len(event_buttons), 1)
+        self.assertIn("İzlem", event_buttons[0].toolTip())
         inline_buttons[0].click()
-        self.assertEqual(triggered[0]["kind"], "form")
+        event_buttons[0].click()
+        self.assertEqual([item["kind"] for item in triggered], ["form", "event"])
 
     def test_calculated_fields_update_from_visible_form_values(self) -> None:
         get_qapplication()

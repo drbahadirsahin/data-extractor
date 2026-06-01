@@ -934,7 +934,6 @@ def repeat_context_options(model: Any, bundle: WorkspaceBundle, language: str) -
                 "kind": "event",
                 "event_id": event_key,
                 "label": tr("data_entry_repeat_event_option", language, event=event_label, instance=instance),
-                "button_label": tr("data_entry_repeat_event_button", language, event=event_label),
                 "contexts_by_form": contexts,
                 "select_context": (event_forms[0], event_key, "", instance),
             }
@@ -961,7 +960,6 @@ def repeat_context_options(model: Any, bundle: WorkspaceBundle, language: str) -
                         form=form_label,
                         instance=instance,
                     ),
-                    "button_label": tr("data_entry_repeat_form_button", language, form=form_label),
                     "contexts_by_form": {
                         form_name: (event_key, form_name, instance),
                     },

@@ -379,7 +379,6 @@ QLabel#DataEntryFormNavEvent {
     font-size: 12px;
     font-weight: 780;
     padding: 8px 6px 4px 6px;
-    border-top: 1px solid #ece7df;
 }
 
 QPushButton#DataEntryFormNavButton {
@@ -403,37 +402,14 @@ QPushButton#DataEntryFormNavButton[active="true"] {
     border: 1px solid #102027;
 }
 
-QFrame#DataEntryRepeatPanel {
-    background: #f8fafc;
-    border: 1px solid #dbe3ea;
-    border-radius: 8px;
-    padding: 4px;
-    margin-bottom: 6px;
-}
-
-QLabel#DataEntryRepeatPanelTitle {
-    color: #536273;
-    font-size: 11px;
-    font-weight: 780;
-}
-
-QPushButton#DataEntryRepeatPanelButton {
-    background: #ffffff;
-    color: #0f766e;
-    border: 1px solid #c9e9df;
-    border-radius: 7px;
-    padding: 7px 9px;
-    text-align: left;
-    font-weight: 720;
-}
-
-QPushButton#DataEntryRepeatPanelButton:hover {
-    background: #edf8f4;
-    border: 1px solid #9ed8cc;
-}
-
 QFrame#DataEntryFormNavButtonRow {
     background: transparent;
+}
+
+QFrame#DataEntryFormNavEventRow {
+    background: transparent;
+    border-top: 1px solid #ece7df;
+    padding-top: 4px;
 }
 
 QPushButton#DataEntryFormNavInlineAdd {
@@ -448,6 +424,20 @@ QPushButton#DataEntryFormNavInlineAdd {
 QPushButton#DataEntryFormNavInlineAdd:hover {
     background: #dff4ee;
     border: 1px solid #8fcfc2;
+}
+
+QPushButton#DataEntryFormNavEventAdd {
+    background: #102027;
+    color: #ffffff;
+    border: 1px solid #102027;
+    border-radius: 7px;
+    font-size: 15px;
+    font-weight: 820;
+}
+
+QPushButton#DataEntryFormNavEventAdd:hover {
+    background: #0f766e;
+    border: 1px solid #0f766e;
 }
 
 QStackedWidget#DataEntryFormStack {

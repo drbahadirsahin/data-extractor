@@ -200,6 +200,41 @@ class GuiDataEntryFormTests(unittest.TestCase):
         self.assertEqual(editor.text(), "14.46")
         self.assertEqual(form.collect_values()["psa"], "14.46")
 
+    def test_number_text_editor_normalizes_scientific_notation_before_collection(self) -> None:
+        get_qapplication()
+        form = DataEntryFormWidget(
+            FormRenderModel(
+                project_id="17",
+                record="1",
+                title="Record 1",
+                sections=[
+                    FormSectionModel(
+                        form_name="form",
+                        title="Form",
+                        fields=[
+                            FormFieldModel(
+                                "hasta_boy",
+                                "form",
+                                "Boy",
+                                "text",
+                                "1,425E+03",
+                                validation="number",
+                            )
+                        ],
+                    )
+                ],
+            )
+        )
+
+        editor = form.editor_widgets["hasta_boy"]
+
+        self.assertEqual(form.collect_values()["hasta_boy"], "1425")
+
+        editor.editingFinished.emit()
+
+        self.assertEqual(editor.text(), "1425")
+        self.assertEqual(form.collect_values()["hasta_boy"], "1425")
+
     def test_set_model_replaces_existing_editors(self) -> None:
         get_qapplication()
         form = DataEntryFormWidget(

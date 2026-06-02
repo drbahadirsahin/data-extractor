@@ -492,7 +492,7 @@ class DataEntryFormWidget:
         from PySide6.QtWidgets import QLineEdit, QSizePolicy
 
         field_key = field_widget_key(field)
-        editor = QLineEdit(field.value_text)
+        editor = QLineEdit(normalize_text_editor_value(field, field.value_text))
         editor.setObjectName("DataEntryLineEdit")
         editor.setProperty("field_name", field.field_name)
         editor.setProperty("field_key", field_key)
@@ -1147,6 +1147,7 @@ def configure_line_edit_validation(editor: Any, field: FormFieldModel) -> None:
         return
     if is_redcap_number_validation(validation):
         validator = QDoubleValidator(editor)
+        validator.setNotation(QDoubleValidator.Notation.StandardNotation)
         minimum = numeric_bound(field.validation_min)
         maximum = numeric_bound(field.validation_max)
         if minimum is not None:

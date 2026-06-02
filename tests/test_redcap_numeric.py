@@ -19,6 +19,13 @@ class RedcapNumericTests(unittest.TestCase):
         self.assertEqual(normalize_redcap_numeric_text("1.234,56", "number"), "1.234,56")
         self.assertEqual(normalize_redcap_numeric_text("1,234.56", "number"), "1,234.56")
 
+    def test_scientific_notation_is_normalized_to_plain_decimal_text(self) -> None:
+        self.assertEqual(normalize_redcap_numeric_text("1,425E+03", "number"), "1425")
+        self.assertEqual(normalize_redcap_numeric_text("1.425E+03", "number"), "1425")
+        self.assertEqual(normalize_redcap_numeric_text("1,425E-03", "number"), "0.001425")
+        self.assertEqual(normalize_redcap_numeric_text("-1.425E-03", "number"), "-0.001425")
+        self.assertEqual(normalize_redcap_numeric_text("1E+03", "integer"), "1000")
+
 
 if __name__ == "__main__":
     unittest.main()

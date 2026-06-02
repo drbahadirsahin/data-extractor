@@ -105,6 +105,34 @@ class DataEntryFormChangesTests(unittest.TestCase):
         self.assertEqual(change_set.changes[0].old_value, "14.46")
         self.assertEqual(change_set.changes[0].new_value, "15.20")
 
+    def test_scientific_number_values_are_compared_as_plain_decimal_values(self) -> None:
+        model = FormRenderModel(
+            project_id="17",
+            record="1",
+            title="Record 1",
+            sections=[
+                FormSectionModel(
+                    form_name="form",
+                    title="Form",
+                    fields=[
+                        FormFieldModel(
+                            "hasta_boy",
+                            "form",
+                            "Boy",
+                            "text",
+                            "1,425E+03",
+                            validation="number",
+                        )
+                    ],
+                )
+            ],
+        )
+
+        change_set = build_form_change_set(model, {"hasta_boy": "1425"})
+
+        self.assertEqual(change_set.changes, [])
+        self.assertEqual(change_set.unchanged_count, 1)
+
     def test_build_change_set_expands_checkbox_choices_to_redcap_fields(self) -> None:
         model = FormRenderModel(
             project_id="17",

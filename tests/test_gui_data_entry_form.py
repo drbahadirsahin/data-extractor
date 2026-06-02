@@ -164,6 +164,42 @@ class GuiDataEntryFormTests(unittest.TestCase):
             ("yasiyor_mu", "1", ""),
         ])
 
+    def test_number_text_editor_normalizes_decimal_comma_before_collection(self) -> None:
+        get_qapplication()
+        form = DataEntryFormWidget(
+            FormRenderModel(
+                project_id="17",
+                record="1",
+                title="Record 1",
+                sections=[
+                    FormSectionModel(
+                        form_name="form",
+                        title="Form",
+                        fields=[
+                            FormFieldModel(
+                                "psa",
+                                "form",
+                                "PSA",
+                                "text",
+                                "",
+                                validation="number",
+                            )
+                        ],
+                    )
+                ],
+            )
+        )
+
+        editor = form.editor_widgets["psa"]
+        editor.setText("14,46")
+
+        self.assertEqual(form.collect_values()["psa"], "14.46")
+
+        editor.editingFinished.emit()
+
+        self.assertEqual(editor.text(), "14.46")
+        self.assertEqual(form.collect_values()["psa"], "14.46")
+
     def test_set_model_replaces_existing_editors(self) -> None:
         get_qapplication()
         form = DataEntryFormWidget(

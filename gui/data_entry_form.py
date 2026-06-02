@@ -21,6 +21,11 @@ from data_entry_form_model import (
 )
 from gui.i18n import tr
 from redcap_calc import evaluate_redcap_calc
+from redcap_numeric import (
+    is_redcap_number_validation,
+    is_redcap_numeric_validation,
+    normalize_redcap_numeric_text,
+)
 
 
 class DataEntryNavButton(QFrame):
@@ -495,6 +500,8 @@ class DataEntryFormWidget:
         editor.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         configure_line_edit_validation(editor, field)
         editor.textChanged.connect(lambda _text=None, key=field_key: self.handle_field_changed(key))
+        if is_redcap_numeric_validation(field.validation):
+            editor.editingFinished.connect(lambda key=field_key: self.normalize_numeric_editor(key))
         self.editor_widgets[field_key] = editor
         return editor
 
@@ -695,7 +702,7 @@ class DataEntryFormWidget:
             elif field.editor == DATE_EDITOR:
                 values[field_key] = date_edit_value(widget)
             elif field.editor == TEXT_EDITOR:
-                values[field_key] = widget.text()
+                values[field_key] = normalize_text_editor_value(field, widget.text())
             elif field.editor in {DROPDOWN_EDITOR, DYNAMIC_DROPDOWN_EDITOR}:
                 values[field_key] = widget.currentData()
             elif field.editor == RADIO_EDITOR:
@@ -755,7 +762,7 @@ class DataEntryFormWidget:
             set_date_picker_value(widget, value)
             return True
         if field.editor == TEXT_EDITOR:
-            widget.setText(str(value or ""))
+            widget.setText(normalize_text_editor_value(field, value))
             return True
         if field.editor in {DROPDOWN_EDITOR, DYNAMIC_DROPDOWN_EDITOR}:
             index = widget.findData(str(value or ""))
@@ -799,6 +806,18 @@ class DataEntryFormWidget:
         self.update_field_row_state(field_key)
         self.update_calculated_fields()
         self.update_branching_visibility()
+
+    def normalize_numeric_editor(self, field_key: str) -> None:
+        field = self.field_models.get(field_key)
+        editor = self.editor_widgets.get(field_key)
+        if field is None or editor is None or not hasattr(editor, "text") or not hasattr(editor, "setText"):
+            return
+        if not is_redcap_numeric_validation(field.validation):
+            return
+        normalized = normalize_redcap_numeric_text(editor.text(), field.validation)
+        if normalized != editor.text():
+            editor.setText(normalized)
+        self.handle_field_changed(field_key)
 
     def clear_radio_selection(self, field_key: str) -> None:
         group = self.editor_widgets.get(field_key)
@@ -872,7 +891,7 @@ class DataEntryFormWidget:
         if field.editor == DATE_EDITOR:
             return date_edit_value(widget)
         if field.editor == TEXT_EDITOR:
-            return widget.text()
+            return normalize_text_editor_value(field, widget.text())
         if field.editor in {DROPDOWN_EDITOR, DYNAMIC_DROPDOWN_EDITOR}:
             return widget.currentData()
         if field.editor == RADIO_EDITOR:
@@ -1095,24 +1114,45 @@ def numeric_instance_value(value: Any) -> int:
         return 0
 
 
+def normalize_text_editor_value(field: FormFieldModel, value: Any) -> str:
+    text = "" if value is None else str(value)
+    if is_redcap_numeric_validation(field.validation):
+        return normalize_redcap_numeric_text(text, field.validation)
+    return text
+
+
+def numeric_bound(value: Any) -> float | None:
+    if value in {None, ""}:
+        return None
+    normalized = normalize_redcap_numeric_text(value, "number")
+    try:
+        return float(normalized)
+    except (TypeError, ValueError):
+        return None
+
+
 def configure_line_edit_validation(editor: Any, field: FormFieldModel) -> None:
     from PySide6.QtGui import QDoubleValidator, QIntValidator
 
     validation = str(field.validation or "").strip().lower()
     if validation == "integer":
         validator = QIntValidator(editor)
-        if field.validation_min not in {None, ""}:
-            validator.setBottom(int(float(str(field.validation_min))))
-        if field.validation_max not in {None, ""}:
-            validator.setTop(int(float(str(field.validation_max))))
+        minimum = numeric_bound(field.validation_min)
+        maximum = numeric_bound(field.validation_max)
+        if minimum is not None:
+            validator.setBottom(int(minimum))
+        if maximum is not None:
+            validator.setTop(int(maximum))
         editor.setValidator(validator)
         return
-    if validation in {"number", "float"}:
+    if is_redcap_number_validation(validation):
         validator = QDoubleValidator(editor)
-        if field.validation_min not in {None, ""}:
-            validator.setBottom(float(str(field.validation_min)))
-        if field.validation_max not in {None, ""}:
-            validator.setTop(float(str(field.validation_max)))
+        minimum = numeric_bound(field.validation_min)
+        maximum = numeric_bound(field.validation_max)
+        if minimum is not None:
+            validator.setBottom(minimum)
+        if maximum is not None:
+            validator.setTop(maximum)
         editor.setValidator(validator)
         return
     if validation.startswith("date"):

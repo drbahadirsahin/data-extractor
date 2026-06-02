@@ -10,6 +10,7 @@ from data_entry_form_model import (
     FormRenderModel,
 )
 from data_entry_store import DataEntryStore
+from redcap_numeric import is_redcap_numeric_validation, normalize_redcap_numeric_text
 
 
 @dataclass(frozen=True)
@@ -68,8 +69,8 @@ def build_form_change_set(
         submitted_key = field_submission_key(field)
         if submitted_key not in submitted_values:
             continue
-        old_value = normalize_scalar_value(field.value_text)
-        new_value = normalize_scalar_value(submitted_values.get(submitted_key))
+        old_value = normalize_field_scalar_value(field, field.value_text)
+        new_value = normalize_field_scalar_value(field, submitted_values.get(submitted_key))
         if old_value == new_value:
             unchanged_count += 1
             continue
@@ -169,6 +170,13 @@ def normalize_scalar_value(value: Any) -> str:
     if value is None:
         return ""
     return str(value)
+
+
+def normalize_field_scalar_value(field: FormFieldModel, value: Any) -> str:
+    normalized = normalize_scalar_value(value)
+    if is_redcap_numeric_validation(field.validation):
+        return normalize_redcap_numeric_text(normalized, field.validation)
+    return normalized
 
 
 def normalize_checkbox_submission(value: Any) -> str:

@@ -48,6 +48,63 @@ class DataEntryFormChangesTests(unittest.TestCase):
         self.assertEqual(change_set.unchanged_count, 1)
         self.assertEqual(change_set.skipped_readonly_count, 1)
 
+    def test_number_fields_compare_decimal_comma_and_dot_as_same_value(self) -> None:
+        model = FormRenderModel(
+            project_id="17",
+            record="1",
+            title="Record 1",
+            sections=[
+                FormSectionModel(
+                    form_name="form",
+                    title="Form",
+                    fields=[
+                        FormFieldModel(
+                            "psa",
+                            "form",
+                            "PSA",
+                            "text",
+                            "14.46",
+                            validation="number",
+                        )
+                    ],
+                )
+            ],
+        )
+
+        change_set = build_form_change_set(model, {"psa": "14,46"})
+
+        self.assertEqual(change_set.changes, [])
+        self.assertEqual(change_set.unchanged_count, 1)
+
+    def test_number_field_changes_are_queued_with_dot_decimal_value(self) -> None:
+        model = FormRenderModel(
+            project_id="17",
+            record="1",
+            title="Record 1",
+            sections=[
+                FormSectionModel(
+                    form_name="form",
+                    title="Form",
+                    fields=[
+                        FormFieldModel(
+                            "psa",
+                            "form",
+                            "PSA",
+                            "text",
+                            "14.46",
+                            validation="number",
+                        )
+                    ],
+                )
+            ],
+        )
+
+        change_set = build_form_change_set(model, {"psa": "15,20"})
+
+        self.assertEqual(len(change_set.changes), 1)
+        self.assertEqual(change_set.changes[0].old_value, "14.46")
+        self.assertEqual(change_set.changes[0].new_value, "15.20")
+
     def test_build_change_set_expands_checkbox_choices_to_redcap_fields(self) -> None:
         model = FormRenderModel(
             project_id="17",

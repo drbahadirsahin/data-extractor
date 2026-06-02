@@ -607,7 +607,7 @@ class DataEntryFormWidget:
         return editor
 
     def build_radio_group(self, field: FormFieldModel) -> Any:
-        from PySide6.QtWidgets import QButtonGroup, QFrame, QRadioButton, QVBoxLayout
+        from PySide6.QtWidgets import QButtonGroup, QFrame, QHBoxLayout, QRadioButton, QToolButton, QVBoxLayout
 
         field_key = field_widget_key(field)
         frame = QFrame()
@@ -625,7 +625,19 @@ class DataEntryFormWidget:
             button.toggled.connect(lambda _checked=False, key=field_key: self.handle_field_changed(key))
             group.addButton(button)
             layout.addWidget(button)
+        clear_row = QHBoxLayout()
+        clear_row.setContentsMargins(0, 2, 0, 0)
+        clear_row.addStretch(1)
+        clear_button = QToolButton()
+        clear_button.setObjectName("DataEntryClearRadioButton")
+        clear_button.setText(tr("data_entry_clear_radio", self.language))
+        clear_button.setEnabled(not field.read_only and group.checkedButton() is not None)
+        clear_button.clicked.connect(lambda _checked=False, key=field_key: self.clear_radio_selection(key))
+        clear_row.addWidget(clear_button, 0)
+        layout.addLayout(clear_row)
         frame._data_entry_button_group = group
+        frame._data_entry_clear_button = clear_button
+        frame._data_entry_radio_read_only = field.read_only
         self.editor_widgets[field_key] = group
         return frame
 
@@ -754,9 +766,14 @@ class DataEntryFormWidget:
                 return True
             return False
         if field.editor == RADIO_EDITOR:
+            if str(value or "") == "":
+                clear_radio_group(widget)
+                self.update_radio_clear_button(field_widget_key(field))
+                return True
             for button in widget.buttons():
                 if str(button.property("choice_code")) == str(value):
                     button.setChecked(True)
+                    self.update_radio_clear_button(field_widget_key(field))
                     return True
             return False
         if field.editor == CHECKBOX_EDITOR:
@@ -778,9 +795,30 @@ class DataEntryFormWidget:
         self.refresh_field_states()
 
     def handle_field_changed(self, field_key: str) -> None:
+        self.update_radio_clear_button(field_key)
         self.update_field_row_state(field_key)
         self.update_calculated_fields()
         self.update_branching_visibility()
+
+    def clear_radio_selection(self, field_key: str) -> None:
+        group = self.editor_widgets.get(field_key)
+        if group is None:
+            return
+        clear_radio_group(group)
+        self.handle_field_changed(field_key)
+
+    def update_radio_clear_button(self, field_key: str) -> None:
+        group = self.editor_widgets.get(field_key)
+        if group is None or not hasattr(group, "parent"):
+            return
+        parent = group.parent()
+        clear_button = getattr(parent, "_data_entry_clear_button", None)
+        if clear_button is None:
+            return
+        clear_button.setEnabled(
+            group.checkedButton() is not None
+            and not bool(getattr(parent, "_data_entry_radio_read_only", False))
+        )
 
     def update_calculated_fields(self) -> None:
         if self.model is None or self._updating_calculations:
@@ -903,6 +941,15 @@ def set_date_picker_value(editor: Any, value: Any) -> None:
     parsed = parse_redcap_date_text(normalized)
     if calendar is not None and parsed.isValid():
         calendar.setSelectedDate(parsed)
+
+
+def clear_radio_group(group: Any) -> None:
+    checked = group.checkedButton() if hasattr(group, "checkedButton") else None
+    if checked is None:
+        return
+    group.setExclusive(False)
+    checked.setChecked(False)
+    group.setExclusive(True)
 
 
 def normalize_redcap_date_text(value: Any) -> str:

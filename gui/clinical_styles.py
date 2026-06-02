@@ -558,6 +558,27 @@ QFrame#DataEntryChoiceGroup {
     background: transparent;
 }
 
+QToolButton#DataEntryClearRadioButton {
+    background: transparent;
+    color: #0f766e;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    padding: 3px 6px;
+    font-size: 12px;
+    font-weight: 720;
+}
+
+QToolButton#DataEntryClearRadioButton:hover {
+    background: #edf8f4;
+    border: 1px solid #b7ded5;
+}
+
+QToolButton#DataEntryClearRadioButton:disabled {
+    color: #9db0bc;
+    background: transparent;
+    border: 1px solid transparent;
+}
+
 QHeaderView::section {
     background: #ebe7df;
     color: #334155;

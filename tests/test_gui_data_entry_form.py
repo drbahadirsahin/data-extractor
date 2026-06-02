@@ -120,6 +120,50 @@ class GuiDataEntryFormTests(unittest.TestCase):
 
         self.assertEqual(form.field_rows["required"].property("field_state"), "filled")
 
+    def test_radio_selection_can_be_cleared(self) -> None:
+        get_qapplication()
+        form = DataEntryFormWidget(
+            FormRenderModel(
+                project_id="17",
+                record="1",
+                title="Record 1",
+                sections=[
+                    FormSectionModel(
+                        form_name="form",
+                        title="Form",
+                        fields=[
+                            FormFieldModel(
+                                "yasiyor_mu",
+                                "form",
+                                "Yaşıyor mu",
+                                "radio",
+                                value="1",
+                                choices=[FormChoiceModel("1", "Evet"), FormChoiceModel("0", "Hayır")],
+                            ),
+                        ],
+                    )
+                ],
+            )
+        )
+        from PySide6.QtWidgets import QToolButton
+
+        clear_button = form.widget.findChild(QToolButton, "DataEntryClearRadioButton")
+
+        self.assertIsNotNone(clear_button)
+        self.assertTrue(clear_button.isEnabled())
+        self.assertEqual(form.collect_values()["yasiyor_mu"], "1")
+
+        clear_button.click()
+
+        self.assertIsNone(form.editor_widgets["yasiyor_mu"].checkedButton())
+        self.assertFalse(clear_button.isEnabled())
+        self.assertEqual(form.collect_values()["yasiyor_mu"], "")
+        self.assertEqual(form.field_rows["yasiyor_mu"].property("field_state"), "empty")
+        change_set = form.collect_change_set()
+        self.assertEqual([(item.field_name, item.old_value, item.new_value) for item in change_set.changes], [
+            ("yasiyor_mu", "1", ""),
+        ])
+
     def test_set_model_replaces_existing_editors(self) -> None:
         get_qapplication()
         form = DataEntryFormWidget(

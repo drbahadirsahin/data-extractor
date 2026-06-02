@@ -1121,39 +1121,19 @@ def normalize_text_editor_value(field: FormFieldModel, value: Any) -> str:
     return text
 
 
-def numeric_bound(value: Any) -> float | None:
-    if value in {None, ""}:
-        return None
-    normalized = normalize_redcap_numeric_text(value, "number")
-    try:
-        return float(normalized)
-    except (TypeError, ValueError):
-        return None
-
-
 def configure_line_edit_validation(editor: Any, field: FormFieldModel) -> None:
-    from PySide6.QtGui import QDoubleValidator, QIntValidator
+    from PySide6.QtCore import QRegularExpression
+    from PySide6.QtGui import QRegularExpressionValidator
 
     validation = str(field.validation or "").strip().lower()
     if validation == "integer":
-        validator = QIntValidator(editor)
-        minimum = numeric_bound(field.validation_min)
-        maximum = numeric_bound(field.validation_max)
-        if minimum is not None:
-            validator.setBottom(int(minimum))
-        if maximum is not None:
-            validator.setTop(int(maximum))
-        editor.setValidator(validator)
+        editor.setValidator(QRegularExpressionValidator(QRegularExpression(r"[+-]?\d*"), editor))
         return
     if is_redcap_number_validation(validation):
-        validator = QDoubleValidator(editor)
-        validator.setNotation(QDoubleValidator.Notation.StandardNotation)
-        minimum = numeric_bound(field.validation_min)
-        maximum = numeric_bound(field.validation_max)
-        if minimum is not None:
-            validator.setBottom(minimum)
-        if maximum is not None:
-            validator.setTop(maximum)
+        validator = QRegularExpressionValidator(
+            QRegularExpression(r"[+-]?(?:\d+(?:[.,]\d*)?|[.,]\d*)?(?:[eE][+-]?\d*)?"),
+            editor,
+        )
         editor.setValidator(validator)
         return
     if validation.startswith("date"):

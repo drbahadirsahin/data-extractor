@@ -200,6 +200,47 @@ class GuiDataEntryFormTests(unittest.TestCase):
         self.assertEqual(editor.text(), "14.46")
         self.assertEqual(form.collect_values()["psa"], "14.46")
 
+    def test_number_text_editor_keeps_dot_decimal_input_under_turkish_locale(self) -> None:
+        get_qapplication()
+        from PySide6.QtCore import QLocale
+        from PySide6.QtTest import QTest
+
+        previous_locale = QLocale()
+        QLocale.setDefault(QLocale("tr_TR"))
+        try:
+            form = DataEntryFormWidget(
+                FormRenderModel(
+                    project_id="17",
+                    record="1",
+                    title="Record 1",
+                    sections=[
+                        FormSectionModel(
+                            form_name="form",
+                            title="Form",
+                            fields=[
+                                FormFieldModel(
+                                    "psa",
+                                    "form",
+                                    "PSA",
+                                    "text",
+                                    "",
+                                    validation="number",
+                                )
+                            ],
+                        )
+                    ],
+                )
+            )
+            editor = form.editor_widgets["psa"]
+
+            QTest.keyClicks(editor, "14.25")
+            editor.editingFinished.emit()
+
+            self.assertEqual(editor.text(), "14.25")
+            self.assertEqual(form.collect_values()["psa"], "14.25")
+        finally:
+            QLocale.setDefault(previous_locale)
+
     def test_number_text_editor_normalizes_scientific_notation_before_collection(self) -> None:
         get_qapplication()
         form = DataEntryFormWidget(

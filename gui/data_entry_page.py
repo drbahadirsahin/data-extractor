@@ -443,6 +443,8 @@ class ClinicalDataEntryPage:
     def save_current_record(self, *, send: bool = False) -> None:
         if self.current_model is None:
             return
+        current_record = self.current_model.record
+        current_section_context = data_entry_section_context(self.form_widget.current_section())
         try:
             result = apply_form_changes(self.store, self.current_model, self.form_widget.collect_values())
         except Exception as exc:
@@ -458,9 +460,7 @@ class ClinicalDataEntryPage:
             if queued_count == 0 and submitted_count == 0:
                 self.status_label.setText(tr("data_entry_no_local_changes", self.language))
                 return
-            current_record = self.current_model.record
-            self.refresh_records()
-            select_record_in_list(self.record_list, current_record)
+            self.refresh_records_preserving_selection(current_record, current_section_context)
             self.status_label.setText(
                 tr(
                     "data_entry_send_done",
@@ -473,10 +473,17 @@ class ClinicalDataEntryPage:
         if queued_count == 0:
             self.status_label.setText(tr("data_entry_no_local_changes", self.language))
             return
-        current_record = self.current_model.record
-        self.refresh_records()
-        select_record_in_list(self.record_list, current_record)
+        self.refresh_records_preserving_selection(current_record, current_section_context)
         self.status_label.setText(tr("data_entry_changes_queued", self.language, count=queued_count))
+
+    def refresh_records_preserving_selection(
+        self,
+        record: str,
+        section_context: tuple[str, str, str, str] | None,
+    ) -> None:
+        self.refresh_records()
+        select_record_in_list(self.record_list, record)
+        select_form_section_by_context(self.form_widget, self.current_model, section_context)
 
     def submit_current_record_changes(self) -> int:
         if self.current_model is None:
@@ -829,6 +836,31 @@ def select_record_in_list(record_list: Any, record: str) -> None:
         if str(item.data(Qt.ItemDataRole.UserRole)) == str(record):
             record_list.setCurrentRow(index)
             return
+
+
+def data_entry_section_context(section: Any | None) -> tuple[str, str, str, str] | None:
+    if section is None:
+        return None
+    return (
+        str(getattr(section, "form_name", "") or ""),
+        str(getattr(section, "event_id", "") or ""),
+        str(getattr(section, "repeat_instrument", "") or ""),
+        str(getattr(section, "instance", "") or ""),
+    )
+
+
+def select_form_section_by_context(
+    form_widget: Any,
+    model: Any,
+    section_context: tuple[str, str, str, str] | None,
+) -> bool:
+    if section_context is None or model is None:
+        return False
+    for index, section in enumerate(getattr(model, "sections", []) or []):
+        if data_entry_section_context(section) == section_context:
+            form_widget.select_section(index)
+            return True
+    return False
 
 
 def build_redcap_import_rows_from_pending(

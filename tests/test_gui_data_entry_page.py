@@ -111,6 +111,45 @@ class GuiDataEntryPageTests(unittest.TestCase):
             self.assertEqual(pending[0]["field_name"], "hasta_ad")
             self.assertEqual(pending[0]["new_value"], "EF")
 
+    def test_local_save_preserves_active_form_section(self) -> None:
+        get_qapplication()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app_home = Path(temp_dir)
+            config_path = write_project_config(app_home, include_laboratory=True)
+            store = DataEntryStore(data_entry_store_path(app_home))
+            store.initialize()
+            store.upsert_remote_values(
+                [
+                    RedcapDataValue(
+                        project_id="17",
+                        event_id="",
+                        record="1",
+                        field_name="hasta_ad",
+                        value="AB",
+                    ),
+                    RedcapDataValue(
+                        project_id="17",
+                        event_id="",
+                        record="1",
+                        field_name="psa",
+                        value="4.2",
+                    ),
+                ]
+            )
+            runtime = build_runtime(app_home, config_path)
+            page = ClinicalDataEntryPage(runtime)
+            page.record_list.setCurrentRow(0)
+
+            page.form_widget.select_section(1)
+            self.assertEqual(page.form_widget.current_section().form_name, "tan_laboratuvar_sonucu")
+            page.form_widget.editor_widgets["psa"].setText("5.1")
+
+            page.save_current_record()
+
+            self.assertEqual(page.current_model.record, "1")
+            self.assertEqual(page.form_widget.current_section().form_name, "tan_laboratuvar_sonucu")
+            self.assertEqual(page.form_widget.collect_values()["psa"], "5.1")
+
     def test_save_and_send_imports_pending_changes(self) -> None:
         get_qapplication()
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -407,7 +446,7 @@ def build_runtime(app_home: Path, config_path: Path):
     )
 
 
-def write_project_config(app_home: Path) -> Path:
+def write_project_config(app_home: Path, *, include_laboratory: bool = False) -> Path:
     project_dir = app_home / "projects" / "17"
     project_dir.mkdir(parents=True, exist_ok=True)
     dictionary_path = project_dir / "dictionary.csv"
@@ -434,6 +473,20 @@ def write_project_config(app_home: Path) -> Path:
             "select_choices_or_calculations": "",
         },
     ]
+    form_labels = {"hasta_bilgileri": "Hasta Bilgileri"}
+    target_forms = ["hasta_bilgileri"]
+    if include_laboratory:
+        rows.append(
+            {
+                "field_name": "psa",
+                "form_name": "tan_laboratuvar_sonucu",
+                "field_type": "text",
+                "field_label": "PSA",
+                "select_choices_or_calculations": "",
+            }
+        )
+        form_labels["tan_laboratuvar_sonucu"] = "Tanı Laboratuvar Sonucu"
+        target_forms.append("tan_laboratuvar_sonucu")
     with dictionary_path.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=headers)
         writer.writeheader()
@@ -445,9 +498,9 @@ def write_project_config(app_home: Path) -> Path:
                 "project_name": "Demo",
                 "project_id": "17",
                 "dictionary_path": "dictionary.csv",
-                "target_forms": ["hasta_bilgileri"],
+                "target_forms": target_forms,
                 "target_fields": [],
-                "form_labels": {"hasta_bilgileri": "Hasta Bilgileri"},
+                "form_labels": form_labels,
                 "dictionary_legend": {
                     "field_name": "field_name",
                     "form_name": "form_name",

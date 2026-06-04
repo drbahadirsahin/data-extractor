@@ -685,7 +685,12 @@ class ClinicalDataEntryPage:
         if not sql:
             return []
         try:
-            options = DynamicSqlEvaluator(self.store).evaluate(sql, record=record)
+            project = current_redcap_project_token(self.runtime.settings)
+            options = DynamicSqlEvaluator(self.store).evaluate(
+                sql,
+                record=record,
+                project_id=project.project_id if project is not None else None,
+            )
         except DynamicSqlError as exc:
             logging.info(
                 "Dynamic SQL options failed for field=%s record=%s: %s",

@@ -545,7 +545,7 @@ def write_project_config(
                     "field_label": "MR seçimi",
                     "select_choices_or_calculations": (
                         "select value from redcap_data "
-                        "where project_id='17' and field_name='mr_tarihi' and record=[record-name]"
+                        "where project_id='16' and field_name='mr_tarihi' and record=[record-name]"
                     ),
                 },
             ]

@@ -31,29 +31,76 @@ class DynamicSqlEvaluator:
     def __init__(self, store: DataEntryStore) -> None:
         self.store = store
 
-    def evaluate(self, sql: str, *, record: str) -> list[DynamicQueryOption]:
-        translated_sql, params = translate_dynamic_sql(sql, record=record)
+    def evaluate(self, sql: str, *, record: str, project_id: str | None = None) -> list[DynamicQueryOption]:
+        translated_sql, params = translate_dynamic_sql(sql, record=record, project_id=project_id)
+        rows = self.execute(translated_sql, params)
+        options = options_from_rows(rows)
+        if options or not has_event_id_predicate(translated_sql):
+            return options
+        fallback_sql = drop_simple_event_id_predicates(translated_sql)
+        if fallback_sql == translated_sql:
+            return options
+        return options_from_rows(self.execute(fallback_sql, params))
+
+    def execute(self, sql: str, params: list[Any]) -> list[sqlite3.Row]:
         with self.store.connect() as db:
             register_mysql_compat_functions(db)
             install_readonly_authorizer(db)
             try:
-                rows = db.execute(translated_sql, params).fetchall()
+                return db.execute(sql, params).fetchall()
             except sqlite3.Error as exc:
                 raise DynamicSqlError(f"Dynamic SQL could not be evaluated locally: {exc}") from exc
             finally:
                 db.set_authorizer(None)
-        return options_from_rows(rows)
 
 
-def translate_dynamic_sql(sql: str, *, record: str) -> tuple[str, list[Any]]:
+def translate_dynamic_sql(sql: str, *, record: str, project_id: str | None = None) -> tuple[str, list[Any]]:
     cleaned = normalize_dynamic_sql(sql)
     validate_dynamic_sql(cleaned)
     translated = rewrite_group_concat_separator(cleaned)
+    translated = rewrite_project_id_predicates(translated, project_id=project_id)
     placeholder_count = translated.count("[record-name]")
     if placeholder_count == 0:
         return translated, []
     translated = translated.replace("[record-name]", "?")
     return translated, [str(record)] * placeholder_count
+
+
+def rewrite_project_id_predicates(sql: str, *, project_id: str | None) -> str:
+    project_key = str(project_id or "").strip()
+    if not project_key:
+        return sql
+    literal = sql_string_literal(project_key)
+    return re.sub(
+        r"(\b(?:\w+\.)?project_id\s*=\s*)(?:'[^']*'|\"[^\"]*\"|[0-9]+)",
+        rf"\g<1>{literal}",
+        sql,
+        flags=re.IGNORECASE,
+    )
+
+
+def has_event_id_predicate(sql: str) -> bool:
+    return bool(re.search(r"\b(?:\w+\.)?event_id\s*=", sql, flags=re.IGNORECASE))
+
+
+def drop_simple_event_id_predicates(sql: str) -> str:
+    stripped = re.sub(
+        r"\s+and\s+(?:\w+\.)?event_id\s*=\s*(?:'[^']*'|\"[^\"]*\"|[0-9]+)",
+        "",
+        sql,
+        flags=re.IGNORECASE,
+    )
+    stripped = re.sub(
+        r"(\bwhere\s+)(?:\w+\.)?event_id\s*=\s*(?:'[^']*'|\"[^\"]*\"|[0-9]+)\s+and\s+",
+        r"\1",
+        stripped,
+        flags=re.IGNORECASE,
+    )
+    return stripped
+
+
+def sql_string_literal(value: str) -> str:
+    return "'" + str(value).replace("'", "''") + "'"
 
 
 def normalize_dynamic_sql(sql: str) -> str:

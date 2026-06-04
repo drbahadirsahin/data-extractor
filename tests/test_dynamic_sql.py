@@ -85,6 +85,16 @@ class DynamicSqlTests(unittest.TestCase):
         self.assertEqual(sql, "select value from redcap_data where project_id=16 and record=?")
         self.assertEqual(params, ["1 OR 1=1"])
 
+    def test_translates_hardcoded_project_id_to_active_project_id(self) -> None:
+        sql, params = translate_dynamic_sql(
+            "select value from redcap_data where r_data.project_id=16 and record=[record-name]",
+            record="12",
+            project_id="17",
+        )
+
+        self.assertEqual(sql, "select value from redcap_data where r_data.project_id='17' and record=?")
+        self.assertEqual(params, ["12"])
+
     def test_evaluates_simple_redcap_data_sql_field(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             store = DataEntryStore(Path(temp_dir) / "data_entry.sqlite3")
@@ -111,6 +121,54 @@ class DynamicSqlTests(unittest.TestCase):
             options = DynamicSqlEvaluator(store).evaluate(
                 "select value from redcap_data where project_id=16 and field_name='mr_trus_bx_tarihi' and record=[record-name]",
                 record="12",
+            )
+
+            self.assertEqual([(item.value, item.label) for item in options], [("2026-05-20", "2026-05-20")])
+
+    def test_evaluates_sql_with_stale_project_id_using_active_project_id(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = DataEntryStore(Path(temp_dir) / "data_entry.sqlite3")
+            store.initialize()
+            store.upsert_remote_values(
+                [
+                    RedcapDataValue(
+                        project_id="17",
+                        event_id="",
+                        record="12",
+                        field_name="mr_trus_bx_tarihi",
+                        value="2026-05-20",
+                    ),
+                ]
+            )
+
+            options = DynamicSqlEvaluator(store).evaluate(
+                "select value from redcap_data where project_id=16 and field_name='mr_trus_bx_tarihi' and record=[record-name]",
+                record="12",
+                project_id="17",
+            )
+
+            self.assertEqual([(item.value, item.label) for item in options], [("2026-05-20", "2026-05-20")])
+
+    def test_falls_back_when_numeric_event_id_filter_does_not_match_local_event_name(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = DataEntryStore(Path(temp_dir) / "data_entry.sqlite3")
+            store.initialize()
+            store.upsert_remote_values(
+                [
+                    RedcapDataValue(
+                        project_id="17",
+                        event_id="mr_event_arm_1",
+                        record="12",
+                        field_name="mr_trus_bx_tarihi",
+                        value="2026-05-20",
+                    ),
+                ]
+            )
+
+            options = DynamicSqlEvaluator(store).evaluate(
+                "select value from redcap_data where project_id=17 and event_id=44 and field_name='mr_trus_bx_tarihi' and record=[record-name]",
+                record="12",
+                project_id="17",
             )
 
             self.assertEqual([(item.value, item.label) for item in options], [("2026-05-20", "2026-05-20")])

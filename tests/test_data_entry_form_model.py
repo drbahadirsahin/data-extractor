@@ -210,6 +210,26 @@ class DataEntryFormModelTests(unittest.TestCase):
             ],
         )
 
+    def test_empty_repeating_event_still_renders_first_instance_for_entry(self) -> None:
+        detail = RecordDetail(project_id="17", record="1")
+        fields = {
+            "event_repeat_form": [FieldSpec("event_repeat", "event_repeat_form", "text", "Event Repeat")],
+        }
+
+        model = build_form_render_model(
+            detail,
+            fields,
+            form_event_map={"event_repeat_form": ["event_2"]},
+            repeating_events=["event_2"],
+        )
+
+        self.assertEqual(len(model.sections), 1)
+        self.assertEqual(model.sections[0].form_name, "event_repeat_form")
+        self.assertEqual(model.sections[0].event_id, "event_2")
+        self.assertEqual(model.sections[0].instance, "1")
+        self.assertEqual(model.sections[0].fields[0].event_id, "event_2")
+        self.assertEqual(model.sections[0].fields[0].instance, "1")
+
     def test_repeating_form_instances_do_not_create_blank_sibling_instances(self) -> None:
         detail = RecordDetail(
             project_id="17",

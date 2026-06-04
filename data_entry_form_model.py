@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable
 
 from data_entry_browser import RecordDetail, RecordFieldValue
 from helpers import ChoiceSpec
@@ -48,6 +48,7 @@ class FormFieldModel:
     repeat_instrument: str = ""
     instance: str = ""
     context_key: str = ""
+    dynamic_sql: str | None = None
 
     @property
     def value_text(self) -> str:
@@ -93,6 +94,7 @@ def build_form_render_model(
     repeating_form_event_map: dict[str, list[str]] | None = None,
     repeating_events: Iterable[str] | None = None,
     additional_contexts_by_form: dict[str, list[tuple[str, str, str]]] | None = None,
+    dynamic_options_provider: Callable[[Any, str], list[Any]] | None = None,
     title: str | None = None,
 ) -> FormRenderModel:
     form_labels = form_labels or {}
@@ -130,6 +132,8 @@ def build_form_render_model(
                 event_id=event_id,
                 repeat_instrument=repeat_instrument,
                 instance=instance,
+                record=detail.record,
+                dynamic_options_provider=dynamic_options_provider,
             )
             for spec in field_specs
         ]
@@ -171,11 +175,18 @@ def build_field_model(
     event_id: str = "",
     repeat_instrument: str = "",
     instance: str = "",
+    record: str = "",
+    dynamic_options_provider: Callable[[Any, str], list[Any]] | None = None,
 ) -> FormFieldModel:
     field_name = metadata_text(field_spec, "field_name")
     field_type = metadata_text(field_spec, "field_type").lower()
     form_name = metadata_text(field_spec, "form_name")
-    choices = choices_for_field(field_spec, field_type=field_type)
+    choices = choices_for_field(
+        field_spec,
+        field_type=field_type,
+        record=record,
+        dynamic_options_provider=dynamic_options_provider,
+    )
     direct_value = direct_values.get(field_name)
     editor = editor_for_field(field_spec, field_type=field_type)
     validation = metadata_optional_text(field_spec, "text_validation")
@@ -224,6 +235,7 @@ def build_field_model(
         repeat_instrument=field_repeat_instrument,
         instance=field_instance,
         context_key=field_context_key(field_name, field_event_id, field_repeat_instrument, field_instance),
+        dynamic_sql=metadata_optional_text(field_spec, "choices") if field_type == "sql" else None,
     )
 
 
@@ -590,7 +602,16 @@ def is_date_validation(validation: str | None) -> bool:
     return str(validation or "").strip().lower().startswith("date")
 
 
-def choices_for_field(field_spec: Any, *, field_type: str) -> list[FormChoiceModel]:
+def choices_for_field(
+    field_spec: Any,
+    *,
+    field_type: str,
+    record: str = "",
+    dynamic_options_provider: Callable[[Any, str], list[Any]] | None = None,
+) -> list[FormChoiceModel]:
+    if field_type == "sql":
+        options = dynamic_options_provider(field_spec, record) if dynamic_options_provider is not None else []
+        return [choice_model(option) for option in options]
     if field_type == "yesno":
         return [
             FormChoiceModel(code="1", label="Evet"),

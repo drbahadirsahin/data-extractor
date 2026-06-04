@@ -217,6 +217,42 @@ class GuiDataEntryPageTests(unittest.TestCase):
             self.assertFalse(page.dag_combo.isHidden())
             self.assertEqual(page.dag_combo.count(), 2)
 
+    def test_dynamic_sql_field_options_are_evaluated_from_local_redcap_data(self) -> None:
+        get_qapplication()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app_home = Path(temp_dir)
+            config_path = write_project_config(app_home, include_dynamic_sql=True)
+            store = DataEntryStore(data_entry_store_path(app_home))
+            store.initialize()
+            store.upsert_remote_values(
+                [
+                    RedcapDataValue(
+                        project_id="17",
+                        event_id="",
+                        record="1",
+                        field_name="mr_tarihi",
+                        value="2026-05-28",
+                    ),
+                    RedcapDataValue(
+                        project_id="17",
+                        event_id="",
+                        record="2",
+                        field_name="mr_tarihi",
+                        value="2099-01-01",
+                    ),
+                ]
+            )
+            runtime = build_runtime(app_home, config_path)
+
+            page = ClinicalDataEntryPage(runtime)
+            page.record_list.setCurrentRow(0)
+            combo = page.form_widget.editor_widgets["mr_secimi"]
+
+            self.assertEqual(combo.count(), 2)
+            self.assertEqual(combo.itemData(1), "2026-05-28")
+            self.assertEqual(combo.itemText(1), "2026-05-28")
+            self.assertNotIn("select", combo.itemText(1).lower())
+
     def test_new_record_creates_record_by_tc_then_queues_changes(self) -> None:
         get_qapplication()
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -446,7 +482,12 @@ def build_runtime(app_home: Path, config_path: Path):
     )
 
 
-def write_project_config(app_home: Path, *, include_laboratory: bool = False) -> Path:
+def write_project_config(
+    app_home: Path,
+    *,
+    include_laboratory: bool = False,
+    include_dynamic_sql: bool = False,
+) -> Path:
     project_dir = app_home / "projects" / "17"
     project_dir.mkdir(parents=True, exist_ok=True)
     dictionary_path = project_dir / "dictionary.csv"
@@ -487,6 +528,30 @@ def write_project_config(app_home: Path, *, include_laboratory: bool = False) ->
         )
         form_labels["tan_laboratuvar_sonucu"] = "Tanı Laboratuvar Sonucu"
         target_forms.append("tan_laboratuvar_sonucu")
+    if include_dynamic_sql:
+        rows.extend(
+            [
+                {
+                    "field_name": "mr_tarihi",
+                    "form_name": "multiparametrik_mr",
+                    "field_type": "text",
+                    "field_label": "MR tarihi",
+                    "select_choices_or_calculations": "",
+                },
+                {
+                    "field_name": "mr_secimi",
+                    "form_name": "multiparametrik_mr",
+                    "field_type": "sql",
+                    "field_label": "MR seçimi",
+                    "select_choices_or_calculations": (
+                        "select value from redcap_data "
+                        "where project_id='17' and field_name='mr_tarihi' and record=[record-name]"
+                    ),
+                },
+            ]
+        )
+        form_labels["multiparametrik_mr"] = "Multiparametrik MR"
+        target_forms.append("multiparametrik_mr")
     with dictionary_path.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=headers)
         writer.writeheader()

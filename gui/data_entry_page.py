@@ -10,7 +10,7 @@ from PySide6.QtCore import QObject, Qt, QThread, Signal, Slot
 
 from data_entry_browser import DataEntryRecordBrowser, RecordDetail
 from data_entry_form_changes import apply_form_changes
-from data_entry_form_model import DESCRIPTION_EDITOR, READONLY_EDITOR, build_form_render_model
+from data_entry_form_model import DESCRIPTION_EDITOR, READONLY_EDITOR, build_form_render_model, metadata_optional_text
 from data_entry_store import DataEntryStore
 from data_entry_sync_client import DataEntrySyncClient, load_data_entry_sync_config
 from data_entry_sync_service import DataEntrySyncService
@@ -20,6 +20,7 @@ from gui.i18n import tr
 from identity_registry_client import IdentityRegistryClient, load_identity_registry_config
 from llm_provider import merge_llm_settings
 from redcap_client import RedcapClient
+from dynamic_sql import DynamicSqlError, DynamicSqlEvaluator
 from release_profile import show_model_settings
 from settings_store import RedcapProjectToken
 from submission_service import normalize_tc_identity_no
@@ -348,6 +349,7 @@ class ClinicalDataEntryPage:
                 repeating_form_event_map=self.bundle.config.repeating_form_event_map,
                 repeating_events=self.bundle.config.repeating_events,
                 additional_contexts_by_form=self.extra_repeat_contexts,
+                dynamic_options_provider=self.dynamic_options_for_field,
                 title=tr("data_entry_record_title", self.language, record=record),
             )
         except Exception as exc:
@@ -422,6 +424,7 @@ class ClinicalDataEntryPage:
             repeating_form_event_map=self.bundle.config.repeating_form_event_map,
             repeating_events=self.bundle.config.repeating_events,
             additional_contexts_by_form=self.extra_repeat_contexts,
+            dynamic_options_provider=self.dynamic_options_for_field,
             title=tr("data_entry_record_title", self.language, record=record_id),
         )
         self.form_widget.set_model(
@@ -658,6 +661,7 @@ class ClinicalDataEntryPage:
             repeating_form_event_map=self.bundle.config.repeating_form_event_map,
             repeating_events=self.bundle.config.repeating_events,
             additional_contexts_by_form=self.extra_repeat_contexts,
+            dynamic_options_provider=self.dynamic_options_for_field,
             title=tr("data_entry_record_title", self.language, record=record),
         )
         self.form_widget.set_model(
@@ -675,6 +679,22 @@ class ClinicalDataEntryPage:
                     self.form_widget.select_section(index)
                     break
         self.set_form_actions_enabled(True)
+
+    def dynamic_options_for_field(self, field_spec: Any, record: str) -> list[dict[str, str]]:
+        sql = metadata_optional_text(field_spec, "choices")
+        if not sql:
+            return []
+        try:
+            options = DynamicSqlEvaluator(self.store).evaluate(sql, record=record)
+        except DynamicSqlError as exc:
+            logging.info(
+                "Dynamic SQL options failed for field=%s record=%s: %s",
+                metadata_optional_text(field_spec, "field_name") or "",
+                record,
+                exc,
+            )
+            return []
+        return [{"code": option.value, "label": option.label} for option in options]
 
     @Slot(str)
     def handle_ai_fill_failure(self, error: str) -> None:

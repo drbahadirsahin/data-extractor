@@ -342,10 +342,11 @@ class DataEntryFormModelTests(unittest.TestCase):
 
     def test_maps_date_and_dynamic_sql_fields(self) -> None:
         detail = RecordDetail(project_id="17", record="1")
+        sql = "select value from redcap_data where project_id=17 and record=[record-name]"
         fields = {
             "form": [
                 FieldSpec("dogum_tarihi", "form", "text", "Doğum Tarihi", text_validation="date_ymd"),
-                FieldSpec("mr_secimi", "form", "sql", "MR Seçimi"),
+                FieldSpec("mr_secimi", "form", "sql", "MR Seçimi", sql),
             ]
         }
 
@@ -354,6 +355,28 @@ class DataEntryFormModelTests(unittest.TestCase):
         by_name = {field.field_name: field for field in model.fields}
         self.assertEqual(by_name["dogum_tarihi"].editor, DATE_EDITOR)
         self.assertEqual(by_name["mr_secimi"].editor, DYNAMIC_DROPDOWN_EDITOR)
+        self.assertEqual(by_name["mr_secimi"].dynamic_sql, sql)
+        self.assertEqual(by_name["mr_secimi"].choices, [])
+
+    def test_dynamic_sql_fields_use_provider_options_instead_of_query_text(self) -> None:
+        detail = RecordDetail(project_id="17", record="1")
+        sql = "select value from redcap_data where project_id=17 and record=[record-name]"
+        fields = {"form": [FieldSpec("mr_secimi", "form", "sql", "MR Seçimi", sql)]}
+
+        model = build_form_render_model(
+            detail,
+            fields,
+            dynamic_options_provider=lambda field_spec, record: [
+                {"code": "2026-05-28", "label": "MR Tarihi: 2026-05-28"}
+            ],
+        )
+
+        field = model.fields[0]
+        self.assertEqual(field.editor, DYNAMIC_DROPDOWN_EDITOR)
+        self.assertEqual([(item.code, item.label) for item in field.choices], [
+            ("2026-05-28", "MR Tarihi: 2026-05-28")
+        ])
+        self.assertNotIn("select", field.choices[0].label.lower())
 
     def test_hides_hidden_annotation_and_marks_readonly_annotation(self) -> None:
         detail = RecordDetail(project_id="17", record="1")

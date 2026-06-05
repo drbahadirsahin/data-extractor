@@ -392,7 +392,53 @@ def form_contexts_by_form(
             if not mapped_events:
                 form_contexts.append(("", "", ""))
         contexts[form_name] = form_contexts
+    add_empty_repeatable_form_contexts_for_missing_events(
+        contexts,
+        form_event_map,
+        repeating_form_event_map,
+        repeating_events,
+    )
     return contexts
+
+
+def add_empty_repeatable_form_contexts_for_missing_events(
+    contexts: dict[str, list[tuple[str, str, str]]],
+    form_event_map: dict[str, list[str]],
+    repeating_form_event_map: dict[str, set[str]],
+    repeating_events: set[str],
+) -> None:
+    events_with_contexts = {
+        event_id
+        for form_contexts in contexts.values()
+        for event_id, _repeat_instrument, _instance in form_contexts
+        if event_id
+    }
+    mapped_events = {
+        normalize_context_part(event_id)
+        for events in form_event_map.values()
+        for event_id in events
+        if normalize_context_part(event_id)
+    }
+    missing_events = mapped_events - events_with_contexts
+    if not missing_events:
+        return
+    for form_name, events in form_event_map.items():
+        form_key = normalize_context_part(form_name)
+        if not form_key:
+            continue
+        for event_name in events:
+            event_key = normalize_context_part(event_name)
+            if event_key not in missing_events:
+                continue
+            form_repeats_here = form_context_allows_repeat(
+                form_key,
+                event_key,
+                repeating_form_event_map=repeating_form_event_map,
+            )
+            if form_repeats_here:
+                append_context(contexts.setdefault(form_key, []), event_key, form_key, "1")
+            elif event_key in repeating_events:
+                append_context(contexts.setdefault(form_key, []), event_key, "", "1")
 
 
 def form_context_allows_repeat(

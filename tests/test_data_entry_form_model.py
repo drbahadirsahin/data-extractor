@@ -255,6 +255,48 @@ class DataEntryFormModelTests(unittest.TestCase):
         self.assertEqual(section.fields[0].repeat_instrument, "mr_trus_fzyon_biyopsi")
         self.assertEqual(section.fields[0].instance, "1")
 
+    def test_empty_event_with_only_repeating_forms_renders_first_form_instances(self) -> None:
+        detail = RecordDetail(project_id="17", record="1")
+        fields = {
+            "mr_trus_fzyon_biyopsi": [
+                FieldSpec("mr_trus_bx_tarihi", "mr_trus_fzyon_biyopsi", "text", "Tarih"),
+            ],
+            "mr_trus_fzyon_biyopsi_lezyon": [
+                FieldSpec("mr_trus_bx_lezyon_hp_tani", "mr_trus_fzyon_biyopsi_lezyon", "text", "Tanı"),
+            ],
+        }
+
+        model = build_form_render_model(
+            detail,
+            fields,
+            form_event_map={
+                "mr_trus_fzyon_biyopsi": ["mr_trus_fzyon_biyo_arm_1"],
+                "mr_trus_fzyon_biyopsi_lezyon": ["mr_trus_fzyon_biyo_arm_1"],
+            },
+            repeating_form_event_map={
+                "mr_trus_fzyon_biyopsi": ["mr_trus_fzyon_biyo_arm_1"],
+                "mr_trus_fzyon_biyopsi_lezyon": ["mr_trus_fzyon_biyo_arm_1"],
+            },
+        )
+
+        self.assertEqual(
+            [(section.form_name, section.event_id, section.repeat_instrument, section.instance) for section in model.sections],
+            [
+                (
+                    "mr_trus_fzyon_biyopsi",
+                    "mr_trus_fzyon_biyo_arm_1",
+                    "mr_trus_fzyon_biyopsi",
+                    "1",
+                ),
+                (
+                    "mr_trus_fzyon_biyopsi_lezyon",
+                    "mr_trus_fzyon_biyo_arm_1",
+                    "mr_trus_fzyon_biyopsi_lezyon",
+                    "1",
+                ),
+            ],
+        )
+
     def test_repeating_form_instances_do_not_create_blank_sibling_instances(self) -> None:
         detail = RecordDetail(
             project_id="17",

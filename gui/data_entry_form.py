@@ -405,6 +405,12 @@ class DataEntryFormWidget:
         row_index = 0
         column_index = 0
         for field in section.fields:
+            if field.section_header:
+                if column_index != 0:
+                    row_index += 1
+                    column_index = 0
+                field_grid.addWidget(self.build_field_section_header(field.section_header), row_index, 0, 1, 2)
+                row_index += 1
             row_widget = self.build_field_row(field)
             if field_uses_full_width(field):
                 if column_index != 0:
@@ -423,6 +429,15 @@ class DataEntryFormWidget:
         field_grid.setColumnStretch(1, 1)
         layout.addLayout(field_grid)
         return frame
+
+    def build_field_section_header(self, text: str) -> Any:
+        from PySide6.QtWidgets import QLabel, QSizePolicy
+
+        header = QLabel(str(text or "").strip())
+        header.setObjectName("DataEntryFormSubsection")
+        header.setWordWrap(True)
+        header.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
+        return header
 
     def build_field_row(self, field: FormFieldModel) -> Any:
         from PySide6.QtCore import Qt

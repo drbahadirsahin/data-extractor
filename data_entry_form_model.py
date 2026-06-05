@@ -34,6 +34,7 @@ class FormFieldModel:
     field_type: str = ""
     choices: list[FormChoiceModel] = field(default_factory=list)
     note: str | None = None
+    section_header: str | None = None
     validation: str | None = None
     validation_min: str | None = None
     validation_max: str | None = None
@@ -221,6 +222,7 @@ def build_field_model(
         field_type=field_type,
         choices=choices,
         note=metadata_optional_text(field_spec, "field_note"),
+        section_header=metadata_optional_text(field_spec, "section_header"),
         validation=validation,
         validation_min=metadata_optional_text(field_spec, "text_validation_min"),
         validation_max=metadata_optional_text(field_spec, "text_validation_max"),
@@ -392,7 +394,7 @@ def form_contexts_by_form(
             if not mapped_events:
                 form_contexts.append(("", "", ""))
         contexts[form_name] = form_contexts
-    add_empty_repeatable_form_contexts_for_missing_events(
+    add_empty_repeatable_form_contexts(
         contexts,
         form_event_map,
         repeating_form_event_map,
@@ -401,44 +403,63 @@ def form_contexts_by_form(
     return contexts
 
 
-def add_empty_repeatable_form_contexts_for_missing_events(
+def add_empty_repeatable_form_contexts(
     contexts: dict[str, list[tuple[str, str, str]]],
     form_event_map: dict[str, list[str]],
     repeating_form_event_map: dict[str, set[str]],
     repeating_events: set[str],
 ) -> None:
-    events_with_contexts = {
-        event_id
-        for form_contexts in contexts.values()
-        for event_id, _repeat_instrument, _instance in form_contexts
-        if event_id
-    }
-    mapped_events = {
-        normalize_context_part(event_id)
-        for events in form_event_map.values()
-        for event_id in events
-        if normalize_context_part(event_id)
-    }
-    missing_events = mapped_events - events_with_contexts
-    if not missing_events:
-        return
+    forms_by_event: dict[str, list[str]] = {}
     for form_name, events in form_event_map.items():
         form_key = normalize_context_part(form_name)
-        if not form_key:
+        if not form_key or form_key not in contexts:
             continue
         for event_name in events:
             event_key = normalize_context_part(event_name)
-            if event_key not in missing_events:
+            if not event_key:
                 continue
-            form_repeats_here = form_context_allows_repeat(
-                form_key,
+            forms_by_event.setdefault(event_key, []).append(form_key)
+
+    for event_key, event_forms in forms_by_event.items():
+        repeatable_forms = [
+            form_name
+            for form_name in event_forms
+            if form_context_allows_repeat(
+                form_name,
                 event_key,
                 repeating_form_event_map=repeating_form_event_map,
             )
-            if form_repeats_here:
-                append_context(contexts.setdefault(form_key, []), event_key, form_key, "1")
-            elif event_key in repeating_events:
-                append_context(contexts.setdefault(form_key, []), event_key, "", "1")
+        ]
+        if not event_forms or len(repeatable_forms) != len(event_forms):
+            continue
+        instances = repeatable_event_instances_for_empty_contexts(
+            contexts,
+            event_key,
+            event_is_repeating=event_key in repeating_events,
+        )
+        for instance in instances:
+            for form_key in repeatable_forms:
+                append_context(contexts.setdefault(form_key, []), event_key, form_key, instance)
+
+
+def repeatable_event_instances_for_empty_contexts(
+    contexts: dict[str, list[tuple[str, str, str]]],
+    event_key: str,
+    *,
+    event_is_repeating: bool,
+) -> list[str]:
+    if not event_is_repeating:
+        return ["1"]
+    instances: list[str] = []
+    for form_contexts in contexts.values():
+        for context_event, _repeat_instrument, instance in form_contexts:
+            if context_event != event_key:
+                continue
+            instance_key = normalize_context_part(instance)
+            if not instance_key or instance_key in instances:
+                continue
+            instances.append(instance_key)
+    return instances or ["1"]
 
 
 def form_context_allows_repeat(

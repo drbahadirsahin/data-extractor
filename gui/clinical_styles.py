@@ -506,6 +506,16 @@ QLabel#DataEntryFieldLabel {
     font-weight: 700;
 }
 
+QLabel#DataEntryFormSubsection {
+    background: #f4f7f5;
+    color: #0f4f49;
+    border: 1px solid #d7e5df;
+    border-left: 4px solid #0f766e;
+    border-radius: 7px;
+    padding: 9px 11px;
+    font-weight: 800;
+}
+
 QLabel#DataEntryFieldState {
     background: #f2f4f5;
     color: #607080;

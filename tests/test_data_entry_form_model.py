@@ -297,6 +297,57 @@ class DataEntryFormModelTests(unittest.TestCase):
             ],
         )
 
+    def test_repeating_form_sibling_stays_visible_after_one_form_is_saved(self) -> None:
+        detail = RecordDetail(
+            project_id="17",
+            record="1",
+            forms=[
+                RecordFormSection(
+                    form_name="records",
+                    fields=[
+                        RecordFieldValue(
+                            field_name="mr_trus_bx_tarihi",
+                            value="2026-06-01",
+                            event_id="mr_trus_fzyon_biyo_arm_1",
+                            repeat_instrument="mr_trus_fzyon_biyopsi",
+                            instance="1",
+                        ),
+                    ],
+                )
+            ],
+        )
+        fields = {
+            "mr_trus_fzyon_biyopsi": [
+                FieldSpec("mr_trus_bx_tarihi", "mr_trus_fzyon_biyopsi", "text", "Tarih"),
+            ],
+            "mr_trus_fzyon_biyopsi_lezyon": [
+                FieldSpec("mr_trus_bx_lezyon_hp_tani", "mr_trus_fzyon_biyopsi_lezyon", "text", "Tanı"),
+            ],
+        }
+
+        model = build_form_render_model(
+            detail,
+            fields,
+            form_event_map={
+                "mr_trus_fzyon_biyopsi": ["mr_trus_fzyon_biyo_arm_1"],
+                "mr_trus_fzyon_biyopsi_lezyon": ["mr_trus_fzyon_biyo_arm_1"],
+            },
+            repeating_form_event_map={
+                "mr_trus_fzyon_biyopsi": ["mr_trus_fzyon_biyo_arm_1"],
+                "mr_trus_fzyon_biyopsi_lezyon": ["mr_trus_fzyon_biyo_arm_1"],
+            },
+        )
+
+        self.assertEqual(
+            [(section.form_name, section.repeat_instrument, section.instance) for section in model.sections],
+            [
+                ("mr_trus_fzyon_biyopsi", "mr_trus_fzyon_biyopsi", "1"),
+                ("mr_trus_fzyon_biyopsi_lezyon", "mr_trus_fzyon_biyopsi_lezyon", "1"),
+            ],
+        )
+        self.assertEqual(model.sections[0].fields[0].value, "2026-06-01")
+        self.assertFalse(model.sections[1].fields[0].present)
+
     def test_repeating_form_instances_do_not_create_blank_sibling_instances(self) -> None:
         detail = RecordDetail(
             project_id="17",
@@ -338,6 +389,7 @@ class DataEntryFormModelTests(unittest.TestCase):
             ],
         )
         fields = {
+            "tbbi_bilgiler": [FieldSpec("diagnosis_date", "tbbi_bilgiler", "text", "Tanı tarihi")],
             "ailede_dier_kanser_yks": [FieldSpec("aile_kanser", "ailede_dier_kanser_yks", "text", "Kanser")],
             "tan_laboratuvar_sonucu": [FieldSpec("lab_psa", "tan_laboratuvar_sonucu", "text", "PSA")],
         }
@@ -346,6 +398,7 @@ class DataEntryFormModelTests(unittest.TestCase):
             detail,
             fields,
             form_event_map={
+                "tbbi_bilgiler": ["event_1"],
                 "ailede_dier_kanser_yks": ["event_1"],
                 "tan_laboratuvar_sonucu": ["event_1"],
             },
@@ -358,6 +411,7 @@ class DataEntryFormModelTests(unittest.TestCase):
         self.assertEqual(
             [(section.form_name, section.repeat_instrument, section.instance) for section in model.sections],
             [
+                ("tbbi_bilgiler", "", ""),
                 ("tan_laboratuvar_sonucu", "tan_laboratuvar_sonucu", "1"),
                 ("tan_laboratuvar_sonucu", "tan_laboratuvar_sonucu", "2"),
             ],
@@ -410,6 +464,20 @@ class DataEntryFormModelTests(unittest.TestCase):
         self.assertIsNone(model.fields[0].calc_expression)
         self.assertEqual(model.fields[1].editor, DESCRIPTION_EDITOR)
         self.assertEqual(model.fields[1].value, "Read this text")
+
+    def test_preserves_redcap_section_header_metadata(self) -> None:
+        detail = RecordDetail(project_id="17", record="1")
+        fields = {
+            "mr_trus_fzyon_biyopsi": [
+                FieldSpec("bx_histopatolojik_tani_mr", "mr_trus_fzyon_biyopsi", "dropdown", "Tanı", section_header="Ek Random Biyopsi"),
+                FieldSpec("bx_sag_toplam_kor_mr", "mr_trus_fzyon_biyopsi", "text", "Kor", section_header="Sağ Lob"),
+            ]
+        }
+
+        model = build_form_render_model(detail, fields)
+
+        self.assertEqual(model.fields[0].section_header, "Ek Random Biyopsi")
+        self.assertEqual(model.fields[1].section_header, "Sağ Lob")
 
     def test_preserves_calc_expression_for_live_form_calculation(self) -> None:
         detail = RecordDetail(project_id="17", record="1")

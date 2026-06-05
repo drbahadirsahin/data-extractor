@@ -458,6 +458,52 @@ class GuiDataEntryPageTests(unittest.TestCase):
         self.assertIn("Event: Klasik Biyopsi #2", labels)
         self.assertIn("Form: Tıbbi Bilgiler & Tanı / Tanı Laboratuvar Sonucu #3", labels)
 
+    def test_repeat_event_option_preserves_form_repeat_context_inside_repeating_event(self) -> None:
+        config = ProjectConfig(
+            project_name="Demo",
+            project_id="17",
+            dictionary_path="dictionary.csv",
+            form_labels={"mr_trus_fzyon_biyopsi": "MR TRUS Füzyon Biyopsi"},
+            event_labels={"mr_trus_fzyon_biyopsi_arm_1": "MR TRUS Füzyon Biyopsi"},
+            form_event_map={"mr_trus_fzyon_biyopsi": ["mr_trus_fzyon_biyopsi_arm_1"]},
+            repeating_events=["mr_trus_fzyon_biyopsi_arm_1"],
+            repeating_form_event_map={"mr_trus_fzyon_biyopsi": ["mr_trus_fzyon_biyopsi_arm_1"]},
+        )
+        bundle = SimpleNamespace(
+            config=config,
+            grouped_fields={"mr_trus_fzyon_biyopsi": [SimpleNamespace(field_name="mr_trus_bx_tarihi")]},
+        )
+        model = FormRenderModel(
+            project_id="17",
+            record="1",
+            title="Record 1",
+            sections=[
+                FormSectionModel(
+                    form_name="mr_trus_fzyon_biyopsi",
+                    title="MR TRUS Füzyon Biyopsi",
+                    event_id="mr_trus_fzyon_biyopsi_arm_1",
+                    repeat_instrument="mr_trus_fzyon_biyopsi",
+                    instance="1",
+                    fields=[FormFieldModel("mr_trus_bx_tarihi", "mr_trus_fzyon_biyopsi", "Tarih", "text")],
+                )
+            ],
+        )
+
+        event_option = next(
+            option
+            for option in repeat_context_options(model, bundle, "tr")
+            if option["kind"] == "event"
+        )
+
+        self.assertEqual(
+            event_option["contexts_by_form"]["mr_trus_fzyon_biyopsi"],
+            ("mr_trus_fzyon_biyopsi_arm_1", "mr_trus_fzyon_biyopsi", "2"),
+        )
+        self.assertEqual(
+            event_option["select_context"],
+            ("mr_trus_fzyon_biyopsi", "mr_trus_fzyon_biyopsi_arm_1", "mr_trus_fzyon_biyopsi", "2"),
+        )
+
 
 def build_runtime(app_home: Path, config_path: Path):
     settings = AppSettings()

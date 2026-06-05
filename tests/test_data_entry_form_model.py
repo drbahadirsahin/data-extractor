@@ -230,6 +230,31 @@ class DataEntryFormModelTests(unittest.TestCase):
         self.assertEqual(model.sections[0].fields[0].event_id, "event_2")
         self.assertEqual(model.sections[0].fields[0].instance, "1")
 
+    def test_form_repeating_inside_empty_repeating_event_renders_first_form_instance(self) -> None:
+        detail = RecordDetail(project_id="17", record="1")
+        fields = {
+            "mr_trus_fzyon_biyopsi": [
+                FieldSpec("mr_trus_bx_tarihi", "mr_trus_fzyon_biyopsi", "text", "Tarih"),
+            ],
+        }
+
+        model = build_form_render_model(
+            detail,
+            fields,
+            form_event_map={"mr_trus_fzyon_biyopsi": ["mr_trus_fzyon_biyopsi_arm_1"]},
+            repeating_form_event_map={"mr_trus_fzyon_biyopsi": ["mr_trus_fzyon_biyopsi_arm_1"]},
+            repeating_events=["mr_trus_fzyon_biyopsi_arm_1"],
+        )
+
+        self.assertEqual(len(model.sections), 1)
+        section = model.sections[0]
+        self.assertEqual(section.form_name, "mr_trus_fzyon_biyopsi")
+        self.assertEqual(section.event_id, "mr_trus_fzyon_biyopsi_arm_1")
+        self.assertEqual(section.repeat_instrument, "mr_trus_fzyon_biyopsi")
+        self.assertEqual(section.instance, "1")
+        self.assertEqual(section.fields[0].repeat_instrument, "mr_trus_fzyon_biyopsi")
+        self.assertEqual(section.fields[0].instance, "1")
+
     def test_repeating_form_instances_do_not_create_blank_sibling_instances(self) -> None:
         detail = RecordDetail(
             project_id="17",

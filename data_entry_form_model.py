@@ -355,7 +355,8 @@ def form_contexts_by_form(
             event_repeats_here = event_key in repeating_events
             if event_repeats_here:
                 for event_instance in event_repeat_contexts.get(event_key, ["1"]):
-                    append_context(form_contexts, event_key, "", event_instance)
+                    repeat_instrument = form_name if form_repeats_here else ""
+                    append_context(form_contexts, event_key, repeat_instrument, event_instance)
             elif not form_repeats_here:
                 append_context(form_contexts, event_key, "", "")
         for value in value_list:

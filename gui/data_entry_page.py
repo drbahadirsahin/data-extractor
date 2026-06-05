@@ -983,16 +983,22 @@ def repeat_context_options(model: Any, bundle: WorkspaceBundle, language: str) -
         instance = str(next_event_instance(model, event_key))
         event_label = event_labels.get(event_key) or event_key
         contexts = {
-            form_name: (event_key, "", instance)
+            form_name: (
+                event_key,
+                form_name if form_repeats_in_event(bundle, form_name, event_key) else "",
+                instance,
+            )
             for form_name in event_forms
         }
+        first_form = event_forms[0]
+        first_event_id, first_repeat_instrument, first_instance = contexts[first_form]
         options.append(
             {
                 "kind": "event",
                 "event_id": event_key,
                 "label": tr("data_entry_repeat_event_option", language, event=event_label, instance=instance),
                 "contexts_by_form": contexts,
-                "select_context": (event_forms[0], event_key, "", instance),
+                "select_context": (first_form, first_event_id, first_repeat_instrument, first_instance),
             }
         )
     repeating_form_events = repeating_form_events_for_options(bundle)
@@ -1040,12 +1046,21 @@ def repeating_form_events_for_options(bundle: WorkspaceBundle) -> dict[str, list
     }
 
 
+def form_repeats_in_event(bundle: WorkspaceBundle, form_name: str, event_id: str) -> bool:
+    configured = bundle.config.repeating_form_event_map or {}
+    form_key = str(form_name)
+    event_key = str(event_id)
+    if form_key in configured:
+        events = {str(item) for item in configured.get(form_key) or []}
+        return not events or event_key in events
+    return form_key in {str(item) for item in bundle.config.repeating_forms or []}
+
+
 def next_event_instance(model: Any, event_id: str) -> int:
     instances = [
         numeric_instance(getattr(section, "instance", ""))
         for section in getattr(model, "sections", []) or []
         if str(getattr(section, "event_id", "")) == str(event_id)
-        and not str(getattr(section, "repeat_instrument", ""))
     ]
     return max(instances or [0]) + 1
 

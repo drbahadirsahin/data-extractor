@@ -495,7 +495,7 @@ class GuiDataEntryFormTests(unittest.TestCase):
                         title="Hasta Bilgileri",
                         event_id="followup_arm_1",
                         event_label="İzlem",
-                        fields=[FormFieldModel("hasta_ad", "hasta_bilgileri", "Hasta adı", "text")],
+                        fields=[FormFieldModel("hasta_ad", "hasta_bilgileri", "Hasta adı", "text", "AH")],
                     ),
                 ],
             ),
@@ -689,6 +689,59 @@ class GuiDataEntryFormTests(unittest.TestCase):
         )
 
         self.assertEqual(form.collect_values()["mr_secimi"], "1. MR Tarihi: 2026-05-28")
+
+    def test_blank_repeat_section_does_not_offer_add_repeat_action(self) -> None:
+        get_qapplication()
+        blank_section = FormSectionModel(
+            form_name="multiparametrik_mr",
+            title="Multiparametrik MR",
+            repeat_instrument="multiparametrik_mr",
+            instance="1",
+            fields=[
+                FormFieldModel(
+                    field_name="mr_tarih_secimi",
+                    form_name="multiparametrik_mr",
+                    label="MR Tarihi",
+                    editor="text",
+                    value="",
+                )
+            ],
+        )
+        filled_section = FormSectionModel(
+            form_name="multiparametrik_mr",
+            title="Multiparametrik MR",
+            repeat_instrument="multiparametrik_mr",
+            instance="1",
+            fields=[
+                FormFieldModel(
+                    field_name="mr_tarih_secimi",
+                    form_name="multiparametrik_mr",
+                    label="MR Tarihi",
+                    editor="text",
+                    value="2026-06-06",
+                )
+            ],
+        )
+        action = {
+            "kind": "form",
+            "form_name": "multiparametrik_mr",
+            "event_id": "",
+            "label": "Form ekle",
+        }
+        form = DataEntryFormWidget()
+        form.set_model(
+            FormRenderModel(project_id="17", record="1", title="Record 1", sections=[blank_section]),
+            repeat_actions=[action],
+        )
+
+        self.assertIsNone(form.repeat_action_for_section(blank_section))
+
+        form.set_model(
+            FormRenderModel(project_id="17", record="1", title="Record 1", sections=[filled_section]),
+            repeat_actions=[action],
+        )
+
+        self.assertIs(form.repeat_action_for_section(filled_section), action)
 
     def test_duplicate_event_fields_use_context_keys(self) -> None:
         get_qapplication()

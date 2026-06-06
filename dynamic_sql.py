@@ -28,11 +28,17 @@ class DynamicSqlEvaluator:
     incrementally when we see real examples that cannot be translated safely.
     """
 
-    def __init__(self, store: DataEntryStore) -> None:
+    def __init__(self, store: DataEntryStore, *, field_repeat_instrument_map: dict[str, str] | None = None) -> None:
         self.store = store
+        self.field_repeat_instrument_map = dict(field_repeat_instrument_map or {})
 
     def evaluate(self, sql: str, *, record: str, project_id: str | None = None) -> list[DynamicQueryOption]:
-        translated_sql, params = translate_dynamic_sql(sql, record=record, project_id=project_id)
+        translated_sql, params = translate_dynamic_sql(
+            sql,
+            record=record,
+            project_id=project_id,
+            field_repeat_instrument_map=self.field_repeat_instrument_map,
+        )
         rows = self.execute(translated_sql, params)
         options = options_from_rows(rows)
         if options or not has_event_id_predicate(translated_sql):
@@ -54,11 +60,21 @@ class DynamicSqlEvaluator:
                 db.set_authorizer(None)
 
 
-def translate_dynamic_sql(sql: str, *, record: str, project_id: str | None = None) -> tuple[str, list[Any]]:
+def translate_dynamic_sql(
+    sql: str,
+    *,
+    record: str,
+    project_id: str | None = None,
+    field_repeat_instrument_map: dict[str, str] | None = None,
+) -> tuple[str, list[Any]]:
     cleaned = normalize_dynamic_sql(sql)
     validate_dynamic_sql(cleaned)
     translated = rewrite_group_concat_separator(cleaned)
     translated = rewrite_project_id_predicates(translated, project_id=project_id)
+    translated = rewrite_redcap_data_source(
+        translated,
+        field_repeat_instrument_map=field_repeat_instrument_map,
+    )
     placeholder_count = translated.count("[record-name]")
     if placeholder_count == 0:
         return translated, []
@@ -107,6 +123,7 @@ def normalize_dynamic_sql(sql: str) -> str:
     cleaned = str(sql or "").strip()
     if not cleaned:
         raise DynamicSqlError("Dynamic SQL is empty.")
+    cleaned = re.sub(r"\[data-table\]", "redcap_data", cleaned, flags=re.IGNORECASE)
     return cleaned[:-1].strip() if cleaned.endswith(";") else cleaned
 
 
@@ -151,6 +168,47 @@ def rewrite_group_concat_separator(sql: str) -> str:
             result.append(f"GROUP_CONCAT({expression.strip()}, {separator.strip()})")
         cursor = close_index + 1
     return "".join(result)
+
+
+def rewrite_redcap_data_source(
+    sql: str,
+    *,
+    field_repeat_instrument_map: dict[str, str] | None = None,
+) -> str:
+    source_filter = redcap_data_source_filter(field_repeat_instrument_map or {})
+    source_sql = f"(SELECT * FROM redcap_data WHERE {source_filter})"
+
+    def replace(match: re.Match[str]) -> str:
+        alias = match.group("alias")
+        if not alias:
+            alias = "redcap_data"
+        return f"FROM {source_sql} AS {alias}"
+
+    return re.sub(
+        r"\bfrom\s+redcap_data\b(?:\s+(?:as\s+)?(?P<alias>(?!where\b|join\b|on\b|group\b|order\b|limit\b|having\b)[A-Za-z_][A-Za-z0-9_]*))?",
+        replace,
+        sql,
+        count=1,
+        flags=re.IGNORECASE,
+    )
+
+
+def redcap_data_source_filter(field_repeat_instrument_map: dict[str, str]) -> str:
+    filters = ["value IS NOT NULL", "value != ''"]
+    normalized = {
+        str(field_name).strip(): str(repeat_instrument).strip()
+        for field_name, repeat_instrument in field_repeat_instrument_map.items()
+        if str(field_name).strip() and str(repeat_instrument).strip()
+    }
+    if not normalized:
+        return " AND ".join(filters)
+    field_list = ", ".join(sql_string_literal(field_name) for field_name in sorted(normalized))
+    repeat_conditions = " OR ".join(
+        f"(field_name = {sql_string_literal(field_name)} AND repeat_instrument = {sql_string_literal(repeat_instrument)})"
+        for field_name, repeat_instrument in sorted(normalized.items())
+    )
+    filters.append(f"(field_name NOT IN ({field_list}) OR {repeat_conditions})")
+    return " AND ".join(filters)
 
 
 def split_top_level_separator(inner: str) -> tuple[str, str] | None:

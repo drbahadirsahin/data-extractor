@@ -6,7 +6,7 @@ import logging
 from pathlib import Path
 from typing import Any, Callable
 
-from PySide6.QtCore import QObject, Qt, QThread, Signal, Slot
+from PySide6.QtCore import QObject, Qt, QThread, QTimer, Signal, Slot
 
 from data_entry_browser import DataEntryRecordBrowser, RecordDetail
 from data_entry_form_changes import apply_form_changes
@@ -632,12 +632,17 @@ class ClinicalDataEntryPage:
                 return
             option = options[0]
         current_values = self.form_widget.collect_values(include_hidden=True)
+        nav_scroll_value = self.form_widget.navigation_scroll_value()
         contexts = contexts_for_repeat_option(option, self.bundle)
         for form_name, context in contexts.items():
             bucket = self.extra_repeat_contexts.setdefault(form_name, [])
             if context not in bucket:
                 bucket.append(context)
-        self.rebuild_current_record_model(preserve_values=current_values, select_context=option["select_context"])
+        self.rebuild_current_record_model(
+            preserve_values=current_values,
+            select_context=option["select_context"],
+            navigation_scroll_value=nav_scroll_value,
+        )
         self.status_label.setText(tr("data_entry_repeat_added", self.language, label=option["label"]))
 
     def rebuild_current_record_model(
@@ -645,6 +650,7 @@ class ClinicalDataEntryPage:
         *,
         preserve_values: dict[str, Any] | None = None,
         select_context: tuple[str, str, str, str] | None = None,
+        navigation_scroll_value: int | None = None,
     ) -> None:
         project = current_redcap_project_token(self.runtime.settings)
         if project is None or self.current_model is None or self.bundle is None:
@@ -678,6 +684,11 @@ class ClinicalDataEntryPage:
                 if context == select_context:
                     self.form_widget.select_section(index)
                     break
+        if navigation_scroll_value is not None:
+            QTimer.singleShot(
+                0,
+                lambda value=int(navigation_scroll_value): self.form_widget.set_navigation_scroll_value(value),
+            )
         self.set_form_actions_enabled(True)
 
     def dynamic_options_for_field(self, field_spec: Any, record: str) -> list[dict[str, str]]:
@@ -686,7 +697,10 @@ class ClinicalDataEntryPage:
             return []
         try:
             project = current_redcap_project_token(self.runtime.settings)
-            options = DynamicSqlEvaluator(self.store).evaluate(
+            options = DynamicSqlEvaluator(
+                self.store,
+                field_repeat_instrument_map=field_repeat_instrument_map_for_bundle(self.bundle),
+            ).evaluate(
                 sql,
                 record=record,
                 project_id=project.project_id if project is not None else None,
@@ -1054,6 +1068,23 @@ def form_repeats_in_event(bundle: WorkspaceBundle, form_name: str, event_id: str
         events = {str(item) for item in configured.get(form_key) or []}
         return not events or event_key in events
     return form_key in {str(item) for item in bundle.config.repeating_forms or []}
+
+
+def field_repeat_instrument_map_for_bundle(bundle: WorkspaceBundle | None) -> dict[str, str]:
+    if bundle is None:
+        return {}
+    repeating_forms = set(str(item) for item in (bundle.config.repeating_forms or []))
+    repeating_forms.update(str(form_name) for form_name in (bundle.config.repeating_form_event_map or {}))
+    mapping: dict[str, str] = {}
+    for form_name, fields in (bundle.grouped_fields or {}).items():
+        form_key = str(form_name)
+        if form_key not in repeating_forms:
+            continue
+        for field in fields or []:
+            field_name = str(getattr(field, "field_name", "") or "").strip()
+            if field_name:
+                mapping[field_name] = form_key
+    return mapping
 
 
 def next_event_instance(model: Any, event_id: str) -> int:

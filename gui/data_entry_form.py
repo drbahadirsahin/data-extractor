@@ -270,6 +270,8 @@ class DataEntryFormWidget:
         return row
 
     def repeat_action_for_section(self, section: Any) -> dict[str, Any] | None:
+        if section_filled_count(section) == 0:
+            return None
         for action in self.repeat_actions:
             if str(action.get("kind") or "") != "form":
                 continue
@@ -283,6 +285,8 @@ class DataEntryFormWidget:
         return None
 
     def repeat_action_for_event_header(self, event_id: str, event_instance: str) -> dict[str, Any] | None:
+        if not self.event_instance_has_values(event_id, event_instance):
+            return None
         for action in self.repeat_actions:
             if str(action.get("kind") or "") != "event":
                 continue
@@ -322,6 +326,29 @@ class DataEntryFormWidget:
                 continue
             latest = max(latest, numeric_instance_value(getattr(section, "instance", "")))
         return latest
+
+    def event_instance_has_values(self, event_id: str, event_instance: str) -> bool:
+        instance_key = str(event_instance or "")
+        for section in getattr(self.model, "sections", []) if self.model is not None else []:
+            if str(getattr(section, "event_id", "") or "") != str(event_id or ""):
+                continue
+            if str(getattr(section, "repeat_instrument", "") or ""):
+                continue
+            if str(getattr(section, "instance", "") or "") != instance_key:
+                continue
+            if section_filled_count(section) > 0:
+                return True
+        return False
+
+    def navigation_scroll_value(self) -> int:
+        if self.form_nav is None:
+            return 0
+        return int(self.form_nav.verticalScrollBar().value())
+
+    def set_navigation_scroll_value(self, value: int) -> None:
+        if self.form_nav is None:
+            return
+        self.form_nav.verticalScrollBar().setValue(max(0, int(value or 0)))
 
     def trigger_repeat_action(self, option: dict[str, Any]) -> None:
         if self.repeat_action_handler is not None:

@@ -82,7 +82,9 @@ class DynamicSqlTests(unittest.TestCase):
             record="1 OR 1=1",
         )
 
-        self.assertEqual(sql, "select value from redcap_data where project_id=16 and record=?")
+        self.assertIn("FROM (SELECT * FROM redcap_data WHERE value IS NOT NULL AND value != '') AS redcap_data", sql)
+        self.assertIn("project_id=16", sql)
+        self.assertIn("record=?", sql)
         self.assertEqual(params, ["1 OR 1=1"])
 
     def test_translates_hardcoded_project_id_to_active_project_id(self) -> None:
@@ -92,7 +94,9 @@ class DynamicSqlTests(unittest.TestCase):
             project_id="17",
         )
 
-        self.assertEqual(sql, "select value from redcap_data where r_data.project_id='17' and record=?")
+        self.assertIn("FROM (SELECT * FROM redcap_data WHERE value IS NOT NULL AND value != '') AS redcap_data", sql)
+        self.assertIn("r_data.project_id='17'", sql)
+        self.assertIn("record=?", sql)
         self.assertEqual(params, ["12"])
 
     def test_evaluates_simple_redcap_data_sql_field(self) -> None:
@@ -227,6 +231,82 @@ class DynamicSqlTests(unittest.TestCase):
             self.assertIn(" | ", options[0].value)
             self.assertIn("2. ", options[1].value)
             self.assertIn("Taraf: Sol", options[1].value)
+
+    def test_ignores_blank_local_redcap_rows_for_dynamic_options(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = DataEntryStore(Path(temp_dir) / "data_entry.sqlite3")
+            store.initialize()
+            store.upsert_remote_values(
+                [
+                    RedcapDataValue("17", "event_1", "12", "mr_tarih_secimi", "", instance="1"),
+                    RedcapDataValue("17", "event_1", "12", "lezyon_pirads", "", instance="1"),
+                ]
+            )
+
+            options = DynamicSqlEvaluator(store).evaluate(
+                COMPLEX_MR_LESION_SQL.replace("project_id = 16", "project_id = 17")
+                .replace("event_id = 44", "event_id = 66")
+                .replace("redcap_data", "[data-table]"),
+                record="12",
+                project_id="17",
+            )
+
+            self.assertEqual(options, [])
+
+    def test_filters_repeating_field_rows_to_matching_repeat_instrument(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = DataEntryStore(Path(temp_dir) / "data_entry.sqlite3")
+            store.initialize()
+            store.upsert_remote_values(
+                [
+                    RedcapDataValue(
+                        "17",
+                        "multiparametrik_mr_arm_1",
+                        "12",
+                        "mr_tarih_secimi",
+                        "2025-02-01",
+                        repeat_instrument="mr_lezyonu_ekle",
+                        instance="1",
+                    ),
+                    RedcapDataValue(
+                        "17",
+                        "multiparametrik_mr_arm_1",
+                        "12",
+                        "lezyon_pirads",
+                        "2",
+                        repeat_instrument="mr_lezyonu_ekle",
+                        instance="1",
+                    ),
+                    RedcapDataValue(
+                        "17",
+                        "multiparametrik_mr_arm_1",
+                        "12",
+                        "lezyon_pirads",
+                        "2",
+                        repeat_instrument="",
+                        instance="1",
+                    ),
+                ]
+            )
+
+            options = DynamicSqlEvaluator(
+                store,
+                field_repeat_instrument_map={
+                    "mr_tarih_secimi": "mr_lezyonu_ekle",
+                    "lezyon_pirads": "mr_lezyonu_ekle",
+                },
+            ).evaluate(
+                COMPLEX_MR_LESION_SQL.replace("project_id = 16", "project_id = 17")
+                .replace("event_id = 44", "event_id = 66")
+                .replace("redcap_data", "[data-table]"),
+                record="12",
+                project_id="17",
+            )
+
+            self.assertEqual(len(options), 1)
+            self.assertIn("MR Tarihi: 2025-02-01", options[0].value)
+            self.assertIn("PiRADS: 2", options[0].value)
+            self.assertEqual(options[0].value.count("PiRADS: 2"), 1)
 
     def test_rejects_non_select_sql(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

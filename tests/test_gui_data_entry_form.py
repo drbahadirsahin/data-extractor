@@ -690,6 +690,85 @@ class GuiDataEntryFormTests(unittest.TestCase):
 
         self.assertEqual(form.collect_values()["mr_secimi"], "1. MR Tarihi: 2026-05-28")
 
+    def test_section_headers_render_as_group_blocks(self) -> None:
+        get_qapplication()
+        form = DataEntryFormWidget(
+            FormRenderModel(
+                project_id="17",
+                record="1",
+                title="Record 1",
+                sections=[
+                    FormSectionModel(
+                        form_name="mr_trus_fzyon_biyopsi",
+                        title="MR TRUS Füzyon Biyopsi",
+                        fields=[
+                            FormFieldModel(
+                                "bx_histopatolojik_tani_mr",
+                                "mr_trus_fzyon_biyopsi",
+                                "Tanı",
+                                "dropdown",
+                                section_header="Ek Random Biyopsi",
+                            ),
+                            FormFieldModel(
+                                "bx_sag_toplam_kor_mr",
+                                "mr_trus_fzyon_biyopsi",
+                                "Kor",
+                                "text",
+                                section_header="Sağ Lob",
+                            ),
+                        ],
+                    )
+                ],
+            )
+        )
+        from PySide6.QtWidgets import QFrame, QLabel
+
+        blocks = form.widget.findChildren(QFrame, "DataEntryFormSubsectionBlock")
+        titles = form.widget.findChildren(QLabel, "DataEntryFormSubsectionTitle")
+
+        self.assertEqual(len(blocks), 2)
+        self.assertEqual([title.text() for title in titles], ["Ek Random Biyopsi", "Sağ Lob"])
+
+    def test_long_combo_options_do_not_force_content_width(self) -> None:
+        get_qapplication()
+        form = DataEntryFormWidget(
+            FormRenderModel(
+                project_id="17",
+                record="1",
+                title="Record 1",
+                sections=[
+                    FormSectionModel(
+                        form_name="form",
+                        title="Form",
+                        fields=[
+                            FormFieldModel(
+                                "long_select",
+                                "form",
+                                "Uzun seçenek",
+                                "dropdown",
+                                choices=[
+                                    FormChoiceModel(
+                                        "1",
+                                        "Bu seçenek metni çok uzun ve form genişliğini büyütmemeli",
+                                    )
+                                ],
+                            )
+                        ],
+                    )
+                ],
+            )
+        )
+        from PySide6.QtWidgets import QComboBox, QSizePolicy
+
+        combo = form.widget.findChild(QComboBox, "DataEntryCombo")
+
+        self.assertIsNotNone(combo)
+        self.assertEqual(combo.sizePolicy().horizontalPolicy(), QSizePolicy.Policy.Ignored)
+        self.assertEqual(
+            combo.sizeAdjustPolicy(),
+            QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon,
+        )
+
     def test_blank_repeat_section_does_not_offer_add_repeat_action(self) -> None:
         get_qapplication()
         blank_section = FormSectionModel(

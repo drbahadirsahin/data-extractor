@@ -356,16 +356,18 @@ class DataEntryFormWidget:
 
     def build_section_scroll(self, section: Any, *, show_title: bool = True) -> Any:
         from PySide6.QtCore import Qt
-        from PySide6.QtWidgets import QFrame, QScrollArea, QVBoxLayout, QWidget
+        from PySide6.QtWidgets import QFrame, QScrollArea, QSizePolicy, QVBoxLayout, QWidget
 
         scroll = QScrollArea()
         scroll.setObjectName("DataEntrySectionScroll")
         scroll.setWidgetResizable(True)
         scroll.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
         container = QWidget()
         container.setObjectName("DataEntrySectionScrollBody")
+        container.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
         layout = QVBoxLayout(container)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
@@ -405,7 +407,7 @@ class DataEntryFormWidget:
         self._rendered_sections.add(section_index)
 
     def build_section_widget(self, section: Any, *, show_title: bool = True) -> Any:
-        from PySide6.QtWidgets import QFrame, QGridLayout, QLabel, QLayout, QSizePolicy, QVBoxLayout
+        from PySide6.QtWidgets import QFrame, QLabel, QLayout, QSizePolicy, QVBoxLayout
 
         frame = QFrame()
         frame.setObjectName("DataEntryFormSection")
@@ -424,6 +426,34 @@ class DataEntryFormWidget:
             title.setObjectName("SectionTitle")
             title.setWordWrap(True)
             layout.addWidget(title)
+        if any(field.section_header for field in section.fields):
+            current_header: str | None = None
+            current_fields: list[FormFieldModel] = []
+
+            def flush_group() -> None:
+                nonlocal current_fields
+                if not current_fields:
+                    return
+                if current_header:
+                    layout.addWidget(self.build_field_group_widget(current_header, current_fields))
+                else:
+                    layout.addLayout(self.build_fields_grid(current_fields))
+                current_fields = []
+
+            for field in section.fields:
+                if field.section_header:
+                    flush_group()
+                    current_header = str(field.section_header).strip()
+                current_fields.append(field)
+            flush_group()
+            return frame
+
+        layout.addLayout(self.build_fields_grid(section.fields))
+        return frame
+
+    def build_fields_grid(self, fields: list[FormFieldModel]) -> Any:
+        from PySide6.QtWidgets import QGridLayout, QLayout
+
         field_grid = QGridLayout()
         field_grid.setContentsMargins(0, 0, 0, 0)
         field_grid.setHorizontalSpacing(14)
@@ -431,13 +461,7 @@ class DataEntryFormWidget:
         field_grid.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
         row_index = 0
         column_index = 0
-        for field in section.fields:
-            if field.section_header:
-                if column_index != 0:
-                    row_index += 1
-                    column_index = 0
-                field_grid.addWidget(self.build_field_section_header(field.section_header), row_index, 0, 1, 2)
-                row_index += 1
+        for field in fields:
             row_widget = self.build_field_row(field)
             if field_uses_full_width(field):
                 if column_index != 0:
@@ -454,17 +478,26 @@ class DataEntryFormWidget:
                 column_index = 0
         field_grid.setColumnStretch(0, 1)
         field_grid.setColumnStretch(1, 1)
-        layout.addLayout(field_grid)
-        return frame
+        return field_grid
 
-    def build_field_section_header(self, text: str) -> Any:
-        from PySide6.QtWidgets import QLabel, QSizePolicy
+    def build_field_group_widget(self, title: str, fields: list[FormFieldModel]) -> Any:
+        from PySide6.QtWidgets import QFrame, QLabel, QLayout, QSizePolicy, QVBoxLayout
 
-        header = QLabel(str(text or "").strip())
-        header.setObjectName("DataEntryFormSubsection")
+        group = QFrame()
+        group.setObjectName("DataEntryFormSubsectionBlock")
+        group.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
+        layout = QVBoxLayout(group)
+        layout.setContentsMargins(14, 12, 14, 14)
+        layout.setSpacing(10)
+        layout.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
+
+        header = QLabel(str(title or "").strip())
+        header.setObjectName("DataEntryFormSubsectionTitle")
         header.setWordWrap(True)
         header.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
-        return header
+        layout.addWidget(header)
+        layout.addLayout(self.build_fields_grid(fields))
+        return group
 
     def build_field_row(self, field: FormFieldModel) -> Any:
         from PySide6.QtCore import Qt
@@ -631,6 +664,7 @@ class DataEntryFormWidget:
         return editor
 
     def build_combo(self, field: FormFieldModel) -> Any:
+        from PySide6.QtCore import Qt
         from PySide6.QtWidgets import QComboBox, QSizePolicy
 
         field_key = field_widget_key(field)
@@ -638,7 +672,10 @@ class DataEntryFormWidget:
         editor.setObjectName("DataEntryCombo")
         editor.setProperty("field_name", field.field_name)
         editor.setProperty("field_key", field_key)
-        editor.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        editor.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+        editor.setMinimumContentsLength(14)
+        editor.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        editor.view().setTextElideMode(Qt.TextElideMode.ElideRight)
         editor.addItem("", "")
         for choice in field.choices:
             editor.addItem(choice.label, choice.code)

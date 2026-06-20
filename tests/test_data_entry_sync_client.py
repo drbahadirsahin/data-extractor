@@ -140,6 +140,22 @@ class DataEntrySyncClientTests(unittest.TestCase):
 
         self.assertEqual(response.records[0].remote_updated_at, "2026-05-24 10:31:00")
 
+    def test_parse_sync_manifest_accepts_numeric_dag_id_when_unique_name_missing(self) -> None:
+        response = parse_sync_manifest_response(
+            {
+                "project_id": "17",
+                "records": [
+                    {
+                        "record": "96-1",
+                        "data_access_group_id": "96",
+                        "sync_updated_at": "2026-05-24 10:31:00",
+                    }
+                ],
+            }
+        )
+
+        self.assertEqual(response.records[0].dag_unique_name, "96")
+
     def test_parse_record_data_flattens_record_rows(self) -> None:
         response = parse_record_data_response(
             {
@@ -314,6 +330,26 @@ class DataEntrySyncClientTests(unittest.TestCase):
         self.assertEqual(by_field["hasta_ad"].value, "AH")
         self.assertEqual(by_field["hasta_soyad"].value, "AŞCI")
         self.assertNotIn("redcap_data_access_group", by_field)
+
+    def test_parse_record_data_treats_numeric_dag_id_as_context_not_field(self) -> None:
+        response = parse_record_data_response(
+            {
+                "project_id": "17",
+                "records": [
+                    {
+                        "record": "96-1",
+                        "data_access_group_id": "96",
+                        "data_access_group": "Marmara",
+                        "hasta_ad": "AH",
+                    }
+                ],
+            }
+        )
+
+        by_field = {item.field_name: item for item in response.values}
+        self.assertEqual(by_field["hasta_ad"].dag_unique_name, "96")
+        self.assertNotIn("data_access_group_id", by_field)
+        self.assertNotIn("data_access_group", by_field)
 
     def test_parse_identity_hash_map_accepts_identity_hash_key(self) -> None:
         response = parse_identity_hash_map_response(

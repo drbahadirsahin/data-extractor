@@ -86,6 +86,7 @@ class DataEntryRecordBrowser:
         *,
         search: str | None = None,
         dag_unique_name: str | None = None,
+        dag_identifiers: Iterable[str] | None = None,
         label_fields: Iterable[str] | None = None,
         limit: int = 100,
         offset: int = 0,
@@ -94,9 +95,11 @@ class DataEntryRecordBrowser:
         project_id = str(project_id)
         params: list[Any] = [project_id, project_id, project_id, project_id]
         filters = ["records.project_id = ?"]
-        if dag_unique_name not in {None, ""}:
+        dag_filter_values = unique_non_empty([dag_unique_name, *(dag_identifiers or [])])
+        if dag_filter_values:
+            placeholders = ", ".join("?" for _ in dag_filter_values)
             filters.append(
-                """
+                f"""
                 COALESCE(
                     state.dag_unique_name,
                     (
@@ -115,10 +118,10 @@ class DataEntryRecordBrowser:
                           AND hash_rows.dag_unique_name IS NOT NULL
                         LIMIT 1
                     )
-                ) = ?
+                ) IN ({placeholders})
                 """
             )
-            params.append(str(dag_unique_name))
+            params.extend(dag_filter_values)
         if search:
             pattern = f"%{search}%"
             filters.append(
@@ -438,3 +441,15 @@ def optional_text(value: Any) -> str | None:
     if value in {None, ""}:
         return None
     return str(value)
+
+
+def unique_non_empty(values: Iterable[Any]) -> list[str]:
+    seen: set[str] = set()
+    normalized: list[str] = []
+    for value in values:
+        text = optional_text(value)
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        normalized.append(text)
+    return normalized

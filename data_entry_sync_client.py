@@ -67,6 +67,11 @@ WIDE_RECORD_META_KEYS = {
     "redcap_data_access_group",
     "dag_unique_name",
     "data_access_group_unique_name",
+    "data_access_group_id",
+    "data_access_group",
+    "dag_group_id",
+    "unique_group_name",
+    "group_name",
     "dag",
     "sync_updated_at",
     "record_last_modified_at",
@@ -263,7 +268,7 @@ def parse_sync_manifest_response(payload: Any) -> SyncManifestResponse:
         records_payload = []
 
     project_id = optional_text(root.get("project_id"))
-    dag_unique_name = first_text(root, ["dag_unique_name", "data_access_group_unique_name", "dag"])
+    dag_unique_name = dag_identifier_from_payload(root)
     top_identity_updated_at = first_text(root, ["identity_hash_updated_at", "identity_updated_at"])
     records: list[RemoteRecordManifest] = []
     for item in records_payload:
@@ -284,8 +289,7 @@ def parse_sync_manifest_response(payload: Any) -> SyncManifestResponse:
                 project_id=record_project_id,
                 record=record,
                 remote_updated_at=sync_updated_at or record_last_modified_at or identity_hash_updated_at or "",
-                dag_unique_name=first_text(item, ["dag_unique_name", "data_access_group_unique_name", "dag"])
-                or dag_unique_name,
+                dag_unique_name=dag_identifier_from_payload(item) or dag_unique_name,
                 record_last_modified_at=record_last_modified_at,
                 identity_hash_updated_at=identity_hash_updated_at,
             )
@@ -466,14 +470,7 @@ def parse_record_rows(
                 value=optional_text(row.get("value")) or "",
                 repeat_instrument=first_text(row, ["repeat_instrument", "redcap_repeat_instrument"]) or "",
                 instance=first_text(row, ["instance", "redcap_repeat_instance"]),
-                dag_unique_name=first_text(
-                    row,
-                    ["dag_unique_name", "data_access_group_unique_name", "redcap_data_access_group", "dag"],
-                )
-                or first_text(
-                    record_context,
-                    ["dag_unique_name", "data_access_group_unique_name", "redcap_data_access_group", "dag"],
-                ),
+                dag_unique_name=dag_identifier_from_payload(row) or dag_identifier_from_payload(record_context),
                 remote_updated_at=remote_updated_at,
             )
         )
@@ -488,10 +485,7 @@ def parse_wide_record_row(row: dict[str, Any], *, root: dict[str, Any]) -> list[
     event_id = first_text(row, ["event_id", "redcap_event_name", "event"])
     repeat_instrument = first_text(row, ["repeat_instrument", "redcap_repeat_instrument"]) or ""
     instance = first_text(row, ["instance", "redcap_repeat_instance"])
-    dag_unique_name = first_text(
-        row,
-        ["dag_unique_name", "data_access_group_unique_name", "redcap_data_access_group", "dag"],
-    )
+    dag_unique_name = dag_identifier_from_payload(row)
     remote_updated_at = first_text(
         row,
         ["sync_updated_at", "record_last_modified_at", "remote_updated_at", "last_modified_at"],
@@ -543,7 +537,7 @@ def parse_identity_hash_map_response(payload: Any) -> IdentityHashMapResponse:
                 project_id=first_text(row, ["project_id"]) or project_id or "",
                 tc_hash=identity_hash,
                 record=record,
-                dag_unique_name=first_text(row, ["dag_unique_name", "data_access_group_unique_name", "dag"]),
+                dag_unique_name=dag_identifier_from_payload(row),
                 remote_updated_at=first_text(row, ["identity_hash_updated_at", "remote_updated_at", "updated_at"]),
             )
         )
@@ -573,6 +567,23 @@ def first_text(payload: dict[str, Any], keys: list[str]) -> str | None:
         if value:
             return value
     return None
+
+
+def dag_identifier_from_payload(payload: dict[str, Any]) -> str | None:
+    return first_text(
+        payload,
+        [
+            "dag_unique_name",
+            "data_access_group_unique_name",
+            "redcap_data_access_group",
+            "unique_group_name",
+            "dag",
+            "data_access_group_id",
+            "dag_group_id",
+            "data_access_group",
+            "group_name",
+        ],
+    )
 
 
 def optional_text(value: Any) -> str | None:

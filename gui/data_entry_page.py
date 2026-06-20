@@ -182,10 +182,28 @@ class ClinicalDataEntryPage:
         self.sync_progress.setVisible(False)
         layout.addWidget(self.sync_progress)
 
+        self.activity_panel = QFrame()
+        self.activity_panel.setObjectName("DataEntryActivityPanel")
+        self.activity_panel.setProperty("tone", "neutral")
+        activity_layout = QHBoxLayout(self.activity_panel)
+        activity_layout.setContentsMargins(12, 10, 12, 10)
+        activity_layout.setSpacing(10)
+        self.activity_marker = QLabel("")
+        self.activity_marker.setObjectName("DataEntryActivityMarker")
+        self.activity_marker.setFixedSize(8, 36)
+        activity_layout.addWidget(self.activity_marker)
+        activity_text_layout = QVBoxLayout()
+        activity_text_layout.setContentsMargins(0, 0, 0, 0)
+        activity_text_layout.setSpacing(2)
+        self.activity_title = QLabel(tr("data_entry_activity_ready_title", self.language))
+        self.activity_title.setObjectName("DataEntryActivityTitle")
         self.status_label = QLabel("")
-        self.status_label.setObjectName("MutedLabel")
+        self.status_label.setObjectName("DataEntryActivityDetail")
         self.status_label.setWordWrap(True)
-        layout.addWidget(self.status_label)
+        activity_text_layout.addWidget(self.activity_title)
+        activity_text_layout.addWidget(self.status_label)
+        activity_layout.addLayout(activity_text_layout, 1)
+        layout.addWidget(self.activity_panel)
 
         splitter = QSplitter()
         splitter.setOrientation(Qt.Orientation.Horizontal)
@@ -231,6 +249,15 @@ class ClinicalDataEntryPage:
         self.save_button.setEnabled(enabled)
         self.send_button.setEnabled(enabled)
 
+    def set_activity(self, title: str, detail: str, *, tone: str = "neutral") -> None:
+        self.activity_title.setText(title)
+        self.status_label.setText(detail)
+        self.activity_panel.setProperty("tone", tone)
+        self.activity_marker.setProperty("tone", tone)
+        for widget in (self.activity_panel, self.activity_marker, self.activity_title, self.status_label):
+            widget.style().unpolish(widget)
+            widget.style().polish(widget)
+
     def on_dag_changed(self) -> None:
         option = self.dag_combo.currentData()
         if self.change_dag is None or not isinstance(option, dict) or option.get("active") or not option.get("switchable"):
@@ -250,7 +277,11 @@ class ClinicalDataEntryPage:
             self.new_record_button.setEnabled(False)
             self.set_form_actions_enabled(False)
             self.record_list.clear()
-            self.status_label.setText(tr("data_entry_connect_first", self.language))
+            self.set_activity(
+                tr("data_entry_activity_attention_title", self.language),
+                tr("data_entry_connect_first", self.language),
+                tone="warning",
+            )
         else:
             self.project_status.setObjectName("StatusPill")
             self.project_status.setText(tr("data_entry_project_ready", self.language, project=project.project_name))
@@ -279,15 +310,23 @@ class ClinicalDataEntryPage:
                     ensure_server_metadata_in_config(config_path, api_url=project.api_url, api_token=token)
                 bundle = load_workspace_bundle(config_path, data_entry=True)
             except Exception as exc:
-                self.status_label.setText(tr("data_entry_metadata_failed", self.language, error=str(exc)))
+                self.set_activity(
+                    tr("data_entry_activity_attention_title", self.language),
+                    tr("data_entry_metadata_failed", self.language, error=str(exc)),
+                    tone="error",
+                )
                 return None
             if bundle.config.project_id and str(bundle.config.project_id) != str(project.project_id):
                 continue
             return bundle
-        self.status_label.setText(tr("data_entry_metadata_missing", self.language))
+        self.set_activity(
+            tr("data_entry_activity_attention_title", self.language),
+            tr("data_entry_metadata_missing", self.language),
+            tone="warning",
+        )
         return None
 
-    def refresh_records(self) -> None:
+    def refresh_records(self, *, update_activity: bool = True) -> None:
         project = current_redcap_project_token(self.runtime.settings)
         self.record_list.clear()
         self.current_model = None
@@ -300,11 +339,17 @@ class ClinicalDataEntryPage:
                 project.project_id,
                 search=self.search_input.text().strip(),
                 dag_unique_name=project.data_access_group_unique_name,
+                dag_identifiers=active_project_dag_identifiers(project),
                 label_fields=data_entry_label_fields(self.runtime.app_config),
                 limit=250,
             )
         except Exception as exc:
-            self.status_label.setText(tr("data_entry_record_load_failed", self.language, error=str(exc)))
+            if update_activity:
+                self.set_activity(
+                    tr("data_entry_activity_error_title", self.language),
+                    tr("data_entry_record_load_failed", self.language, error=str(exc)),
+                    tone="error",
+                )
             return
         for record in records:
             item_text = record.record
@@ -319,11 +364,16 @@ class ClinicalDataEntryPage:
                 item_text = f"{item_text} ({', '.join(flags)})"
             self.record_list.addItem(item_text)
             self.record_list.item(self.record_list.count() - 1).setData(Qt.ItemDataRole.UserRole, record.record)
-        self.status_label.setText(
-            tr("data_entry_records_loaded", self.language, count=len(records))
-            if records
-            else tr("data_entry_no_records", self.language)
-        )
+        if update_activity:
+            self.set_activity(
+                tr("data_entry_activity_records_title", self.language),
+                (
+                    tr("data_entry_records_loaded", self.language, count=len(records))
+                    if records
+                    else tr("data_entry_no_records", self.language)
+                ),
+                tone="neutral" if records else "warning",
+            )
 
     def open_selected_record(self) -> None:
         project = current_redcap_project_token(self.runtime.settings)
@@ -333,7 +383,11 @@ class ClinicalDataEntryPage:
         if self.bundle is None:
             self.bundle = self.load_active_bundle()
         if self.bundle is None:
-            self.status_label.setText(tr("data_entry_metadata_missing", self.language))
+            self.set_activity(
+                tr("data_entry_activity_attention_title", self.language),
+                tr("data_entry_metadata_missing", self.language),
+                tone="warning",
+            )
             return
         record = str(current.data(Qt.ItemDataRole.UserRole))
         try:
@@ -353,7 +407,11 @@ class ClinicalDataEntryPage:
                 title=tr("data_entry_record_title", self.language, record=record),
             )
         except Exception as exc:
-            self.status_label.setText(tr("data_entry_record_open_failed", self.language, error=str(exc)))
+            self.set_activity(
+                tr("data_entry_activity_error_title", self.language),
+                tr("data_entry_record_open_failed", self.language, error=str(exc)),
+                tone="error",
+            )
             return
         self.current_model = model
         self.form_widget.set_model(
@@ -362,7 +420,11 @@ class ClinicalDataEntryPage:
             repeat_action_handler=self.add_repeat_context,
         )
         self.set_form_actions_enabled(True)
-        self.status_label.setText(tr("data_entry_record_opened", self.language, record=record))
+        self.set_activity(
+            tr("data_entry_activity_records_title", self.language),
+            tr("data_entry_record_opened", self.language, record=record),
+            tone="neutral",
+        )
 
     def open_new_record(self, tc_identity_no: str | None = None, dag_option: dict[str, Any] | None = None) -> None:
         project = current_redcap_project_token(self.runtime.settings)
@@ -451,40 +513,62 @@ class ClinicalDataEntryPage:
         try:
             result = apply_form_changes(self.store, self.current_model, self.form_widget.collect_values())
         except Exception as exc:
-            self.status_label.setText(tr("data_entry_save_failed", self.language, error=str(exc)))
+            self.set_activity(
+                tr("data_entry_activity_error_title", self.language),
+                tr("data_entry_save_failed", self.language, error=str(exc)),
+                tone="error",
+            )
             return
         queued_count = result.queued_count
         if send:
             try:
                 submitted_count = self.submit_current_record_changes()
             except Exception as exc:
-                self.status_label.setText(tr("data_entry_send_failed", self.language, error=str(exc)))
+                self.set_activity(
+                    tr("data_entry_activity_error_title", self.language),
+                    tr("data_entry_send_failed", self.language, error=str(exc)),
+                    tone="error",
+                )
                 return
             if queued_count == 0 and submitted_count == 0:
-                self.status_label.setText(tr("data_entry_no_local_changes", self.language))
+                self.set_activity(
+                    tr("data_entry_activity_save_title", self.language),
+                    tr("data_entry_no_local_changes", self.language),
+                    tone="warning",
+                )
                 return
             self.refresh_records_preserving_selection(current_record, current_section_context)
-            self.status_label.setText(
+            self.set_activity(
+                tr("data_entry_activity_send_title", self.language),
                 tr(
                     "data_entry_send_done",
                     self.language,
                     queued=queued_count,
                     submitted=submitted_count,
-                )
+                ),
+                tone="success",
             )
             return
         if queued_count == 0:
-            self.status_label.setText(tr("data_entry_no_local_changes", self.language))
+            self.set_activity(
+                tr("data_entry_activity_save_title", self.language),
+                tr("data_entry_no_local_changes", self.language),
+                tone="warning",
+            )
             return
         self.refresh_records_preserving_selection(current_record, current_section_context)
-        self.status_label.setText(tr("data_entry_changes_queued", self.language, count=queued_count))
+        self.set_activity(
+            tr("data_entry_activity_save_title", self.language),
+            tr("data_entry_changes_queued", self.language, count=queued_count),
+            tone="success",
+        )
 
     def refresh_records_preserving_selection(
         self,
         record: str,
         section_context: tuple[str, str, str, str] | None,
     ) -> None:
-        self.refresh_records()
+        self.refresh_records(update_activity=False)
         select_record_in_list(self.record_list, record)
         select_form_section_by_context(self.form_widget, self.current_model, section_context)
 
@@ -730,11 +814,19 @@ class ClinicalDataEntryPage:
         project = current_redcap_project_token(self.runtime.settings)
         if project is None:
             if not auto:
-                self.status_label.setText(tr("data_entry_connect_first", self.language))
+                self.set_activity(
+                    tr("data_entry_activity_attention_title", self.language),
+                    tr("data_entry_connect_first", self.language),
+                    tone="warning",
+                )
             return False
         token = self.runtime.secrets_store.get(project.token_secret_name)
         if not token:
-            self.status_label.setText(tr("data_entry_missing_token", self.language))
+            self.set_activity(
+                tr("data_entry_activity_attention_title", self.language),
+                tr("data_entry_missing_token", self.language),
+                tone="warning",
+            )
             return False
         if self._sync_thread is not None:
             return False
@@ -743,7 +835,8 @@ class ClinicalDataEntryPage:
         self.refresh_button.setEnabled(False)
         self.sync_progress.setVisible(True)
         sync_config = load_data_entry_sync_config(self.runtime.app_config, api_url=project.api_url)
-        self.status_label.setText(
+        self.set_activity(
+            tr("data_entry_activity_sync_title", self.language),
             tr(
                 "data_entry_sync_running_detail",
                 self.language,
@@ -751,7 +844,8 @@ class ClinicalDataEntryPage:
                 manifest=sync_config.manifest_action,
                 data=sync_config.record_data_action,
                 hashes=sync_config.identity_hash_action,
-            )
+            ),
+            tone="running",
         )
         thread = QThread(self.widget)
         worker = DataEntrySyncWorker(
@@ -784,7 +878,8 @@ class ClinicalDataEntryPage:
             getattr(report, "values_updated", 0),
             getattr(report, "identity_hashes_updated", 0),
         )
-        self.status_label.setText(
+        self.set_activity(
+            tr("data_entry_activity_sync_done_title", self.language),
             tr(
                 "data_entry_sync_done",
                 self.language,
@@ -793,14 +888,19 @@ class ClinicalDataEntryPage:
                 conflicts=len(getattr(report, "conflict_records", []) or []),
                 values=getattr(report, "values_updated", 0),
                 hashes=getattr(report, "identity_hashes_updated", 0),
-            )
+            ),
+            tone="success",
         )
-        self.refresh_records()
+        self.refresh_records(update_activity=False)
 
     @Slot(str)
     def handle_sync_failure(self, error: str) -> None:
         logging.info("Data-entry sync failed: %s", error)
-        self.status_label.setText(tr("data_entry_sync_failed", self.language, error=error))
+        self.set_activity(
+            tr("data_entry_activity_error_title", self.language),
+            tr("data_entry_sync_failed", self.language, error=error),
+            tone="error",
+        )
 
     @Slot()
     def cleanup_sync_thread(self) -> None:
@@ -824,6 +924,40 @@ def current_redcap_project_token(settings: Any) -> RedcapProjectToken | None:
         if project.project_id == str(selected_project_id):
             return project
     return None
+
+
+def active_project_dag_identifiers(project: RedcapProjectToken) -> list[str]:
+    identifiers: list[Any] = [
+        project.data_access_group_unique_name,
+        project.data_access_group_id,
+        project.data_access_group,
+    ]
+    for option in project.available_data_access_groups or []:
+        if not isinstance(option, dict) or not option.get("active"):
+            continue
+        identifiers.extend(
+            [
+                option.get("data_access_group_unique_name"),
+                option.get("unique_group_name"),
+                option.get("dag"),
+                option.get("redcap_data_access_group"),
+                option.get("data_access_group_id"),
+                option.get("dag_group_id"),
+                option.get("data_access_group"),
+                option.get("group_name"),
+            ]
+        )
+    seen: set[str] = set()
+    normalized: list[str] = []
+    for value in identifiers:
+        if value in {None, ""}:
+            continue
+        text = str(value)
+        if text in seen:
+            continue
+        seen.add(text)
+        normalized.append(text)
+    return normalized
 
 
 def candidate_project_config_paths(runtime: Any, project_id: str) -> list[Path]:

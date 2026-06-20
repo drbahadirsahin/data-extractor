@@ -12,6 +12,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from data_entry_store import DataEntryStore, RedcapDataValue
 from gui.data_entry_page import (
     ClinicalDataEntryPage,
+    active_project_dag_identifiers,
     apply_ai_fill_overrides,
     build_data_entry_ai_config,
     data_entry_store_path,
@@ -216,6 +217,27 @@ class GuiDataEntryPageTests(unittest.TestCase):
             self.assertIn("Marmara", page.project_user_context.text())
             self.assertFalse(page.dag_combo.isHidden())
             self.assertEqual(page.dag_combo.count(), 2)
+
+    def test_active_dag_filter_uses_unique_name_and_numeric_id(self) -> None:
+        project = RedcapProjectToken(
+            api_url="https://example.test/api/",
+            project_id="17",
+            project_name="Test",
+            token_secret_name="token",
+            data_access_group_id="96",
+            data_access_group_unique_name="marmara",
+            data_access_group="Marmara",
+            available_data_access_groups=[
+                {
+                    "data_access_group_id": "96",
+                    "data_access_group_unique_name": "marmara",
+                    "data_access_group": "Marmara",
+                    "active": True,
+                }
+            ],
+        )
+
+        self.assertEqual(active_project_dag_identifiers(project), ["marmara", "96", "Marmara"])
 
     def test_dynamic_sql_field_options_are_evaluated_from_local_redcap_data(self) -> None:
         get_qapplication()

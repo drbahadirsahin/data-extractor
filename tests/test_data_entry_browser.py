@@ -213,6 +213,31 @@ class DataEntryRecordBrowserTests(unittest.TestCase):
             self.assertEqual(records[0].record, "manifest-only")
             self.assertEqual(records[0].value_count, 0)
 
+    def test_list_records_with_active_dag_excludes_unassigned_local_records(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = DataEntryStore(Path(temp_dir) / "data_entry.sqlite3")
+            store.initialize()
+            store.upsert_remote_manifest(
+                [
+                    RemoteRecordManifest(
+                        project_id="17",
+                        record="96",
+                        remote_updated_at="2026-05-24T10:00:00Z",
+                        dag_unique_name=None,
+                    ),
+                    RemoteRecordManifest(
+                        project_id="17",
+                        record="96-1",
+                        remote_updated_at="2026-05-24T10:00:00Z",
+                        dag_unique_name="96",
+                    ),
+                ]
+            )
+
+            records = DataEntryRecordBrowser(store).list_records("17", dag_identifiers=["96"])
+
+            self.assertEqual([record.record for record in records], ["96-1"])
+
 
 if __name__ == "__main__":
     unittest.main()

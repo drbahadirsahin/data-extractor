@@ -304,6 +304,64 @@ QComboBox#DagSwitchCombo {
     font-weight: 650;
 }
 
+QFrame#DataEntryActivityPanel {
+    background: #ffffff;
+    border: 1px solid #ded8cd;
+    border-radius: 8px;
+}
+
+QFrame#DataEntryActivityPanel[tone="running"] {
+    background: #f4fbf9;
+    border: 1px solid #b7ded5;
+}
+
+QFrame#DataEntryActivityPanel[tone="success"] {
+    background: #edf8f4;
+    border: 1px solid #a9d9cf;
+}
+
+QFrame#DataEntryActivityPanel[tone="warning"] {
+    background: #fff8ec;
+    border: 1px solid #efcf9d;
+}
+
+QFrame#DataEntryActivityPanel[tone="error"] {
+    background: #fff1f0;
+    border: 1px solid #efb8b0;
+}
+
+QLabel#DataEntryActivityMarker {
+    background: #8ca0ad;
+    border-radius: 4px;
+}
+
+QLabel#DataEntryActivityMarker[tone="running"] {
+    background: #0f766e;
+}
+
+QLabel#DataEntryActivityMarker[tone="success"] {
+    background: #0f766e;
+}
+
+QLabel#DataEntryActivityMarker[tone="warning"] {
+    background: #c57a1c;
+}
+
+QLabel#DataEntryActivityMarker[tone="error"] {
+    background: #b42318;
+}
+
+QLabel#DataEntryActivityTitle {
+    color: #20303b;
+    font-size: 13px;
+    font-weight: 760;
+}
+
+QLabel#DataEntryActivityDetail {
+    color: #607080;
+    font-size: 12px;
+}
+
 QListWidget, QPlainTextEdit, QTableWidget {
     background: #ffffff;
     border: 1px solid #ded8cd;

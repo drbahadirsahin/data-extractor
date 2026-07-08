@@ -35,6 +35,39 @@ QScrollArea#ClinicalPageScroll {
     border: none;
 }
 
+QFrame#GlobalContextBar {
+    background: #ffffff;
+    border: 1px solid #e6e1d8;
+    border-radius: 10px;
+    min-height: 56px;
+}
+
+QLabel#GlobalContextCaption {
+    color: #64748b;
+    font-size: 11px;
+    font-weight: 720;
+}
+
+QLabel#GlobalContextValue {
+    color: #17202a;
+    font-size: 12px;
+    font-weight: 760;
+}
+
+QLabel#GlobalContextSeparator {
+    background: #ece7df;
+    min-width: 1px;
+    max-width: 1px;
+    min-height: 34px;
+    max-height: 34px;
+}
+
+QLabel#GlobalContextAppLabel {
+    color: #8a98a8;
+    font-size: 12px;
+    font-weight: 720;
+}
+
 QWidget#ClinicalSidebar {
     background: #071927;
     border-right: 1px solid #071927;
@@ -286,6 +319,12 @@ QLabel#SmallMutedLabel {
     font-size: 12px;
 }
 
+QLabel#SidebarSubtitle {
+    color: #9fb4c1;
+    font-size: 12px;
+    line-height: 130%;
+}
+
 QLabel#VersionLabel {
     color: #9eb3bd;
     font-size: 12px;
@@ -527,6 +566,27 @@ QComboBox#SidebarProjectCombo {
     padding: 10px 11px;
     font-weight: 780;
     min-height: 28px;
+}
+
+QComboBox#GlobalProjectCombo, QComboBox#GlobalDagCombo {
+    background: #f8faf9;
+    color: #0f2027;
+    border: 1px solid #e2ded6;
+    border-radius: 7px;
+    padding: 7px 10px;
+    min-height: 22px;
+    font-size: 12px;
+    font-weight: 760;
+}
+
+QComboBox#GlobalProjectCombo:focus, QComboBox#GlobalDagCombo:focus {
+    border: 1px solid #0b8f84;
+}
+
+QComboBox#GlobalProjectCombo:disabled, QComboBox#GlobalDagCombo:disabled {
+    background: #f3f5f6;
+    color: #83919f;
+    border: 1px solid #e1e5e8;
 }
 
 QComboBox#SidebarProjectCombo:disabled {

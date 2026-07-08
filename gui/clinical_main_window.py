@@ -81,6 +81,7 @@ class ClinicalMainWindow:
         self.language = runtime.settings.ui.language
         self.show_advanced_ui = show_advanced_ui(runtime.app_config)
         self._updating_connection_combo = False
+        self._updating_global_dag_combo = False
         self._window = QMainWindow()
         self._window.setObjectName("ClinicalMainWindow")
         self._window.setWindowTitle(tr("app_title", self.language))
@@ -123,18 +124,11 @@ class ClinicalMainWindow:
         brand_layout.addLayout(brand_text, 1)
         sidebar_layout.addWidget(brand_block)
 
-        subtitle = QLabel(tr("clinical_sidebar_subtitle", self.language))
-        subtitle.setObjectName("SmallMutedLabel")
+        subtitle = QLabel(tr("clinical_sidebar_subtitle_short", self.language))
+        subtitle.setObjectName("SidebarSubtitle")
         subtitle.setWordWrap(True)
         sidebar_layout.addWidget(subtitle)
-
-        self.connection_project_combo = QComboBox()
-        self.connection_project_combo.setObjectName("SidebarProjectCombo")
-        self.connection_project_combo.setMinimumContentsLength(18)
-        self.connection_project_combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
-        self.connection_project_combo.currentIndexChanged.connect(self.select_sidebar_project)
-        sidebar_layout.addWidget(self.connection_project_combo)
-        sidebar_layout.addSpacing(12)
+        sidebar_layout.addSpacing(18)
 
         self.stack = QStackedWidget()
         self.nav_buttons: dict[str, QPushButton] = {}
@@ -198,8 +192,9 @@ class ClinicalMainWindow:
         content = QWidget()
         content.setObjectName("ClinicalContent")
         content_layout = QVBoxLayout(content)
-        content_layout.setContentsMargins(28, 24, 28, 24)
-        content_layout.setSpacing(16)
+        content_layout.setContentsMargins(26, 20, 26, 24)
+        content_layout.setSpacing(14)
+        content_layout.addWidget(self.build_global_context_bar(QComboBox, QFrame, QHBoxLayout, QLabel, QVBoxLayout, Qt))
         content_layout.addWidget(self.stack)
 
         layout.addWidget(sidebar)
@@ -208,6 +203,75 @@ class ClinicalMainWindow:
 
         self.refresh_connection_state()
         self.set_page("home")
+
+    def build_global_context_bar(
+        self,
+        combo_box_cls: Any,
+        frame_cls: Any,
+        hbox_layout_cls: Any,
+        label_cls: Any,
+        vbox_layout_cls: Any,
+        qt_cls: Any,
+    ) -> Any:
+        bar = frame_cls()
+        bar.setObjectName("GlobalContextBar")
+        layout = hbox_layout_cls(bar)
+        layout.setContentsMargins(14, 10, 14, 10)
+        layout.setSpacing(12)
+
+        project_group = vbox_layout_cls()
+        project_group.setContentsMargins(0, 0, 0, 0)
+        project_group.setSpacing(3)
+        project_caption = label_cls(tr("clinical_global_project", self.language))
+        project_caption.setObjectName("GlobalContextCaption")
+        project_group.addWidget(project_caption)
+        self.connection_project_combo = combo_box_cls()
+        self.connection_project_combo.setObjectName("GlobalProjectCombo")
+        self.connection_project_combo.setMinimumContentsLength(22)
+        self.connection_project_combo.setSizeAdjustPolicy(combo_box_cls.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        self.connection_project_combo.currentIndexChanged.connect(self.select_sidebar_project)
+        project_group.addWidget(self.connection_project_combo)
+        layout.addLayout(project_group, 2)
+
+        separator_1 = label_cls("")
+        separator_1.setObjectName("GlobalContextSeparator")
+        layout.addWidget(separator_1)
+
+        user_group = vbox_layout_cls()
+        user_group.setContentsMargins(0, 0, 0, 0)
+        user_group.setSpacing(3)
+        user_caption = label_cls(tr("clinical_global_user", self.language))
+        user_caption.setObjectName("GlobalContextCaption")
+        user_group.addWidget(user_caption)
+        self.global_user_context_label = label_cls(tr("clinical_user_context_missing", self.language))
+        self.global_user_context_label.setObjectName("GlobalContextValue")
+        self.global_user_context_label.setWordWrap(True)
+        user_group.addWidget(self.global_user_context_label)
+        layout.addLayout(user_group, 2)
+
+        separator_2 = label_cls("")
+        separator_2.setObjectName("GlobalContextSeparator")
+        layout.addWidget(separator_2)
+
+        dag_group = vbox_layout_cls()
+        dag_group.setContentsMargins(0, 0, 0, 0)
+        dag_group.setSpacing(3)
+        dag_caption = label_cls(tr("clinical_global_dag", self.language))
+        dag_caption.setObjectName("GlobalContextCaption")
+        dag_group.addWidget(dag_caption)
+        self.global_dag_combo = combo_box_cls()
+        self.global_dag_combo.setObjectName("GlobalDagCombo")
+        self.global_dag_combo.setMinimumContentsLength(18)
+        self.global_dag_combo.currentIndexChanged.connect(self.on_global_dag_changed)
+        dag_group.addWidget(self.global_dag_combo)
+        layout.addLayout(dag_group, 2)
+
+        layout.addStretch(1)
+        status = label_cls("LLM Extractor")
+        status.setObjectName("GlobalContextAppLabel")
+        status.setAlignment(qt_cls.AlignmentFlag.AlignRight | qt_cls.AlignmentFlag.AlignVCenter)
+        layout.addWidget(status, 0)
+        return bar
 
     def build_scroll_page(self, widget: Any, scroll_area_cls: Any, frame_cls: Any, qt_cls: Any) -> Any:
         scroll = scroll_area_cls()
@@ -220,9 +284,32 @@ class ClinicalMainWindow:
 
     def refresh_connection_state(self) -> None:
         self.populate_connection_project_combo()
+        self.refresh_global_context()
         self.home_page.refresh()
         self.import_page.refresh()
         self.data_entry_page.refresh_project_state()
+
+    def refresh_global_context(self) -> None:
+        project = current_redcap_project_token(self.runtime.settings)
+        if project is None:
+            self.global_user_context_label.setText(tr("clinical_user_context_missing", self.language))
+        else:
+            self.global_user_context_label.setText(format_project_user_context(project, self.language))
+        self._updating_global_dag_combo = True
+        self.global_dag_combo.blockSignals(True)
+        configure_dag_switch_combo(self.global_dag_combo, project, self.language)
+        self.global_dag_combo.blockSignals(False)
+        self._updating_global_dag_combo = False
+        repolish(self.global_user_context_label)
+        repolish(self.global_dag_combo)
+
+    def on_global_dag_changed(self) -> None:
+        if self._updating_global_dag_combo:
+            return
+        option = self.global_dag_combo.currentData()
+        if not isinstance(option, dict) or option.get("active") or not option.get("switchable"):
+            return
+        self.change_active_dag(option)
 
     def populate_connection_project_combo(self) -> None:
         current_project_id = self.runtime.settings.redcap.selected_project_id
@@ -271,6 +358,7 @@ class ClinicalMainWindow:
             self.refresh_project_user_context(project)
             self.workspace_page.refresh_redcap_projects()
             self.populate_connection_project_combo()
+            self.refresh_global_context()
             self.home_page.refresh()
             self.import_page.refresh()
             self.data_entry_page.refresh_project_state()
@@ -682,6 +770,7 @@ class ClinicalHomePage:
 
         project_context = QFrame()
         project_context.setObjectName("DashboardContextCard")
+        project_context.setVisible(False)
         project_context_layout = QVBoxLayout(project_context)
         project_context_layout.setContentsMargins(14, 12, 14, 12)
         project_context_layout.setSpacing(6)
@@ -1007,6 +1096,7 @@ class ClinicalRedcapPage:
         header_layout.addLayout(title_group, 1)
         context_card = QFrame()
         context_card.setObjectName("PageContextCard")
+        context_card.setVisible(False)
         context_layout = QVBoxLayout(context_card)
         context_layout.setContentsMargins(14, 12, 14, 12)
         context_layout.setSpacing(6)
@@ -1439,6 +1529,7 @@ class ClinicalImportPage:
         self.dag_combo.currentIndexChanged.connect(self.on_dag_changed)
         project_status_group = QFrame()
         project_status_group.setObjectName("PageContextCard")
+        project_status_group.setVisible(False)
         project_status_layout = QVBoxLayout(project_status_group)
         project_status_layout.setContentsMargins(14, 12, 14, 12)
         project_status_layout.setSpacing(6)

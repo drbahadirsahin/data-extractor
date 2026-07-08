@@ -149,6 +149,7 @@ class ClinicalDataEntryPage:
         self.dag_combo.currentIndexChanged.connect(self.on_dag_changed)
         project_status_group = QFrame()
         project_status_group.setObjectName("PageContextCard")
+        project_status_group.setVisible(False)
         project_status_layout = QVBoxLayout(project_status_group)
         project_status_layout.setContentsMargins(14, 12, 14, 12)
         project_status_layout.setSpacing(6)

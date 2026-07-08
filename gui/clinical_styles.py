@@ -36,8 +36,33 @@ QScrollArea#ClinicalPageScroll {
 }
 
 QWidget#ClinicalSidebar {
-    background: #0f2027;
-    border-right: 1px solid #0f2027;
+    background: #071923;
+    border-right: 1px solid #071923;
+}
+
+QFrame#SidebarBrandBlock {
+    background: transparent;
+    border: none;
+    padding-bottom: 6px;
+}
+
+QLabel#SidebarAppMark {
+    background: #0b9488;
+    color: #ffffff;
+    border: 1px solid #3ed5c7;
+    border-radius: 8px;
+    min-width: 38px;
+    max-width: 38px;
+    min-height: 38px;
+    max-height: 38px;
+    font-size: 11px;
+    font-weight: 850;
+}
+
+QLabel#SidebarVersionHint {
+    color: #8ca6b3;
+    font-size: 11px;
+    font-weight: 650;
 }
 
 QFrame#TopBand, QFrame#PageHeader {
@@ -50,6 +75,128 @@ QFrame#WorkflowCard, QFrame#ConnectionPanel, QFrame#InfoPanel, QFrame#WizardPane
     background: #fffdf9;
     border: 1px solid #e3ded5;
     border-radius: 8px;
+}
+
+QFrame#DashboardHeader {
+    background: #fffdf9;
+    border: 1px solid #e3ded5;
+    border-radius: 10px;
+}
+
+QFrame#DashboardContextCard {
+    background: #f1fbf8;
+    border: 1px solid #b9e4dc;
+    border-radius: 9px;
+    min-width: 250px;
+}
+
+QLabel#DashboardEyebrow {
+    color: #0b746b;
+    font-size: 12px;
+    font-weight: 820;
+}
+
+QFrame#DashboardMetricCard {
+    background: #fffdf9;
+    border: 1px solid #e3ded5;
+    border-radius: 9px;
+    min-height: 88px;
+}
+
+QLabel#DashboardMetricCaption {
+    color: #526272;
+    font-size: 12px;
+    font-weight: 750;
+}
+
+QLabel#DashboardMetricValue {
+    color: #111827;
+    font-size: 26px;
+    font-weight: 840;
+}
+
+QLabel#DashboardMetricNote {
+    color: #7a8795;
+    font-size: 12px;
+}
+
+QLabel#DashboardSectionTitle {
+    color: #17202a;
+    font-size: 14px;
+    font-weight: 820;
+}
+
+QFrame#DashboardActionCard {
+    background: #fffdf9;
+    border: 1px solid #e3ded5;
+    border-radius: 10px;
+    min-height: 150px;
+}
+
+QFrame#DashboardActionCard:hover {
+    background: #ffffff;
+    border: 1px solid #b7dfd5;
+}
+
+QLabel#DashboardActionBadge {
+    background: #e6f7f3;
+    color: #0b746b;
+    border: 1px solid #b7dfd5;
+    border-radius: 8px;
+    min-width: 34px;
+    max-width: 34px;
+    min-height: 34px;
+    max-height: 34px;
+    font-size: 12px;
+    font-weight: 840;
+}
+
+QLabel#DashboardActionTitle {
+    color: #17202a;
+    font-size: 15px;
+    font-weight: 820;
+}
+
+QLabel#DashboardActionBody {
+    color: #667789;
+    font-size: 12px;
+}
+
+QPushButton#DashboardActionButton {
+    background: transparent;
+    color: #0b746b;
+    border: 1px solid transparent;
+    padding: 6px 2px;
+    text-align: left;
+    font-weight: 800;
+}
+
+QPushButton#DashboardActionButton:hover {
+    background: #edf8f4;
+    border: 1px solid #b7dfd5;
+}
+
+QFrame#DashboardPanel {
+    background: #fffdf9;
+    border: 1px solid #e3ded5;
+    border-radius: 10px;
+}
+
+QFrame#DashboardStatusRow {
+    background: transparent;
+    border-bottom: 1px solid #eee9e1;
+    min-height: 28px;
+}
+
+QLabel#DashboardStatusLabel {
+    color: #667789;
+    font-size: 12px;
+}
+
+QLabel#DashboardStatusValue {
+    color: #0b746b;
+    font-size: 12px;
+    font-weight: 780;
 }
 
 QFrame#WorkflowCard:hover {
@@ -391,6 +538,18 @@ QFrame#DataEntryActivityPanel[tone="warning"] {
 QFrame#DataEntryActivityPanel[tone="error"] {
     background: #fff1f0;
     border: 1px solid #efb8b0;
+}
+
+QFrame#DataEntryToolbar {
+    background: #fffdf9;
+    border: 1px solid #e3ded5;
+    border-radius: 10px;
+}
+
+QFrame#DataEntryWorkspaceShell {
+    background: #fffdf9;
+    border: 1px solid #e3ded5;
+    border-radius: 10px;
 }
 
 QLabel#DataEntryActivityMarker {

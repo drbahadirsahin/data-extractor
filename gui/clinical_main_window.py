@@ -100,10 +100,28 @@ class ClinicalMainWindow:
         sidebar_layout.setContentsMargins(20, 22, 20, 20)
         sidebar_layout.setSpacing(9)
 
-        brand = QLabel(tr("clinical_brand", self.language))
+        brand_block = QFrame()
+        brand_block.setObjectName("SidebarBrandBlock")
+        brand_layout = QHBoxLayout(brand_block)
+        brand_layout.setContentsMargins(0, 0, 0, 0)
+        brand_layout.setSpacing(10)
+        app_mark = QLabel("LLM")
+        app_mark.setObjectName("SidebarAppMark")
+        app_mark.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        brand_layout.addWidget(app_mark, 0, Qt.AlignmentFlag.AlignTop)
+        brand_text = QVBoxLayout()
+        brand_text.setContentsMargins(0, 0, 0, 0)
+        brand_text.setSpacing(3)
+        brand = QLabel("LLM Extractor")
         brand.setObjectName("AppBrand")
         brand.setWordWrap(True)
-        sidebar_layout.addWidget(brand)
+        brand_text.addWidget(brand)
+        version_hint = QLabel(app_version(runtime.app_config))
+        version_hint.setObjectName("SidebarVersionHint")
+        version_hint.setWordWrap(True)
+        brand_text.addWidget(version_hint)
+        brand_layout.addLayout(brand_text, 1)
+        sidebar_layout.addWidget(brand_block)
 
         subtitle = QLabel(tr("clinical_sidebar_subtitle", self.language))
         subtitle.setObjectName("SmallMutedLabel")
@@ -638,27 +656,34 @@ class ClinicalHomePage:
         self.widget = QWidget()
         layout = QVBoxLayout(self.widget)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(18)
+        layout.setSpacing(16)
 
-        band = QFrame()
-        band.setObjectName("TopBand")
-        band_layout = QHBoxLayout(band)
-        band_layout.setContentsMargins(22, 20, 22, 20)
-        band_layout.setSpacing(18)
+        dashboard_header = QFrame()
+        dashboard_header.setObjectName("DashboardHeader")
+        header_layout = QHBoxLayout(dashboard_header)
+        header_layout.setContentsMargins(24, 22, 24, 22)
+        header_layout.setSpacing(18)
 
-        text_group = QVBoxLayout()
-        title = QLabel(tr("clinical_home_title", self.language))
-        title.setObjectName("PageTitle")
-        text_group.addWidget(title)
-        subtitle = QLabel(tr("clinical_home_subtitle", self.language))
-        subtitle.setObjectName("MutedLabel")
-        subtitle.setWordWrap(True)
-        text_group.addWidget(subtitle)
-        band_layout.addLayout(text_group, 1)
+        greeting_group = QVBoxLayout()
+        greeting_group.setContentsMargins(0, 0, 0, 0)
+        greeting_group.setSpacing(7)
+        eyebrow = QLabel(tr("clinical_home_eyebrow", self.language))
+        eyebrow.setObjectName("DashboardEyebrow")
+        greeting_group.addWidget(eyebrow)
+        self.welcome_label = QLabel("")
+        self.welcome_label.setObjectName("PageTitle")
+        self.welcome_label.setWordWrap(True)
+        greeting_group.addWidget(self.welcome_label)
+        self.welcome_subtitle = QLabel(tr("clinical_home_subtitle", self.language))
+        self.welcome_subtitle.setObjectName("MutedLabel")
+        self.welcome_subtitle.setWordWrap(True)
+        greeting_group.addWidget(self.welcome_subtitle)
+        header_layout.addLayout(greeting_group, 1)
 
-        project_context = QWidget()
+        project_context = QFrame()
+        project_context.setObjectName("DashboardContextCard")
         project_context_layout = QVBoxLayout(project_context)
-        project_context_layout.setContentsMargins(0, 0, 0, 0)
+        project_context_layout.setContentsMargins(14, 12, 14, 12)
         project_context_layout.setSpacing(6)
         self.status_label = QLabel("")
         self.status_label.setObjectName("WarningPill")
@@ -672,26 +697,76 @@ class ClinicalHomePage:
         project_context_layout.addWidget(self.status_label)
         project_context_layout.addWidget(self.user_context_label)
         project_context_layout.addWidget(self.dag_combo)
-        band_layout.addWidget(project_context)
-        layout.addWidget(band)
+        header_layout.addWidget(project_context, 0)
+        layout.addWidget(dashboard_header)
 
-        grid = QGridLayout()
-        grid.setSpacing(14)
-        grid.setColumnStretch(0, 1)
-        grid.setColumnStretch(1, 1)
-        grid.addWidget(
-            build_workflow_card(
-                title=tr("clinical_card_redcap_title", self.language),
-                body=tr("clinical_card_redcap_body", self.language),
-                primary_label=tr("clinical_card_redcap_action", self.language),
-                primary_action=open_redcap,
+        metrics_grid = QGridLayout()
+        metrics_grid.setSpacing(12)
+        self.record_metric_value = QLabel("-")
+        self.pending_metric_value = QLabel("-")
+        self.connection_metric_value = QLabel("-")
+        self.sync_metric_value = QLabel("-")
+        metrics_grid.addWidget(
+            build_dashboard_metric_card(
+                tr("clinical_home_metric_records", self.language),
+                self.record_metric_value,
+                tr("clinical_home_metric_local_cache", self.language),
             ),
             0,
             0,
         )
-        grid.addWidget(
-            build_workflow_card(
-                title=tr("clinical_card_document_title", self.language),
+        metrics_grid.addWidget(
+            build_dashboard_metric_card(
+                tr("clinical_home_metric_pending", self.language),
+                self.pending_metric_value,
+                tr("clinical_home_metric_submission_queue", self.language),
+            ),
+            0,
+            1,
+        )
+        metrics_grid.addWidget(
+            build_dashboard_metric_card(
+                tr("clinical_home_metric_redcap", self.language),
+                self.connection_metric_value,
+                tr("clinical_home_metric_active_project", self.language),
+            ),
+            0,
+            2,
+        )
+        metrics_grid.addWidget(
+            build_dashboard_metric_card(
+                tr("clinical_home_metric_last_sync", self.language),
+                self.sync_metric_value,
+                tr("clinical_home_metric_local_status", self.language),
+            ),
+            0,
+            3,
+        )
+        for column in range(4):
+            metrics_grid.setColumnStretch(column, 1)
+        layout.addLayout(metrics_grid)
+
+        quick_title = QLabel(tr("clinical_home_quick_actions", self.language))
+        quick_title.setObjectName("DashboardSectionTitle")
+        layout.addWidget(quick_title)
+
+        action_grid = QGridLayout()
+        action_grid.setSpacing(12)
+        action_grid.addWidget(
+            build_dashboard_action_card(
+                code="01",
+                title=tr("clinical_card_data_entry_title", self.language).replace("4. ", ""),
+                body=tr("clinical_card_data_entry_body", self.language),
+                primary_label=tr("clinical_card_data_entry_action", self.language),
+                primary_action=open_data_entry,
+            ),
+            0,
+            0,
+        )
+        action_grid.addWidget(
+            build_dashboard_action_card(
+                code="02",
+                title=tr("clinical_card_document_title", self.language).replace("2. ", ""),
                 body=tr("clinical_card_document_body", self.language),
                 primary_label=tr("clinical_card_document_action", self.language),
                 primary_action=open_document_flow,
@@ -699,31 +774,71 @@ class ClinicalHomePage:
             0,
             1,
         )
-        grid.addWidget(
-            build_workflow_card(
-                title=tr("clinical_card_excel_title", self.language),
+        action_grid.addWidget(
+            build_dashboard_action_card(
+                code="03",
+                title=tr("clinical_card_excel_title", self.language).replace("3. ", ""),
                 body=tr("clinical_card_excel_body", self.language),
                 primary_label=tr("clinical_card_excel_action", self.language),
                 primary_action=open_excel,
             ),
-            1,
             0,
-            1,
             2,
         )
-        grid.addWidget(
-            build_workflow_card(
-                title=tr("clinical_card_data_entry_title", self.language),
-                body=tr("clinical_card_data_entry_body", self.language),
-                primary_label=tr("clinical_card_data_entry_action", self.language),
-                primary_action=open_data_entry,
+        action_grid.addWidget(
+            build_dashboard_action_card(
+                code="04",
+                title=tr("clinical_card_redcap_title", self.language).replace("1. ", ""),
+                body=tr("clinical_card_redcap_body", self.language),
+                primary_label=tr("clinical_card_redcap_action", self.language),
+                primary_action=open_redcap,
             ),
-            2,
             0,
-            1,
-            2,
+            3,
         )
-        layout.addLayout(grid)
+        for column in range(4):
+            action_grid.setColumnStretch(column, 1)
+        layout.addLayout(action_grid)
+
+        lower_grid = QGridLayout()
+        lower_grid.setSpacing(12)
+        activity_panel = QFrame()
+        activity_panel.setObjectName("DashboardPanel")
+        activity_layout = QVBoxLayout(activity_panel)
+        activity_layout.setContentsMargins(18, 16, 18, 16)
+        activity_layout.setSpacing(10)
+        activity_title = QLabel(tr("clinical_home_recent_activity", self.language))
+        activity_title.setObjectName("DashboardSectionTitle")
+        activity_layout.addWidget(activity_title)
+        self.activity_project_row = build_dashboard_status_row(tr("clinical_home_status_project", self.language), "-")
+        self.activity_records_row = build_dashboard_status_row(tr("clinical_home_status_records", self.language), "-")
+        self.activity_pending_row = build_dashboard_status_row(tr("clinical_home_status_pending", self.language), "-")
+        activity_layout.addWidget(self.activity_project_row)
+        activity_layout.addWidget(self.activity_records_row)
+        activity_layout.addWidget(self.activity_pending_row)
+        activity_layout.addStretch(1)
+
+        system_panel = QFrame()
+        system_panel.setObjectName("DashboardPanel")
+        system_layout = QVBoxLayout(system_panel)
+        system_layout.setContentsMargins(18, 16, 18, 16)
+        system_layout.setSpacing(10)
+        system_title = QLabel(tr("clinical_home_system_status", self.language))
+        system_title.setObjectName("DashboardSectionTitle")
+        system_layout.addWidget(system_title)
+        self.system_redcap_row = build_dashboard_status_row(tr("clinical_home_system_server", self.language), "-")
+        self.system_llm_row = build_dashboard_status_row(tr("clinical_home_system_llm", self.language), "-")
+        self.system_local_row = build_dashboard_status_row(tr("clinical_home_system_local_db", self.language), "-")
+        system_layout.addWidget(self.system_redcap_row)
+        system_layout.addWidget(self.system_llm_row)
+        system_layout.addWidget(self.system_local_row)
+        system_layout.addStretch(1)
+
+        lower_grid.addWidget(activity_panel, 0, 0)
+        lower_grid.addWidget(system_panel, 0, 1)
+        lower_grid.setColumnStretch(0, 1)
+        lower_grid.setColumnStretch(1, 1)
+        layout.addLayout(lower_grid)
         layout.addStretch(1)
         self.refresh()
 
@@ -736,6 +851,13 @@ class ClinicalHomePage:
     def refresh(self) -> None:
         project = self.runtime.settings.redcap.selected_project_name
         project_token = current_redcap_project_token(self.runtime.settings)
+        username = project_token.username if project_token is not None and project_token.username else None
+        self.welcome_label.setText(
+            tr("clinical_home_welcome_user", self.language, username=username)
+            if username
+            else tr("clinical_home_title", self.language)
+        )
+        record_count, pending_count, last_sync = self.dashboard_cache_stats(project_token)
         if project:
             self.status_label.setObjectName("StatusPill")
             self.status_label.setText(tr("clinical_ready_status", self.language, project=project))
@@ -750,11 +872,91 @@ class ClinicalHomePage:
             self.status_label.setText(tr("clinical_setup_required_status", self.language))
             self.user_context_label.setVisible(False)
             self.user_context_label.setText("")
+        self.record_metric_value.setText(format_dashboard_count(record_count))
+        self.pending_metric_value.setText(format_dashboard_count(pending_count))
+        self.connection_metric_value.setText(
+            tr("clinical_home_connection_ready", self.language)
+            if project
+            else tr("clinical_home_connection_missing", self.language)
+        )
+        self.sync_metric_value.setText(last_sync or "-")
+        set_dashboard_status_row(
+            self.activity_project_row,
+            tr("clinical_home_status_project", self.language),
+            project or tr("clinical_home_project_waiting", self.language),
+        )
+        set_dashboard_status_row(
+            self.activity_records_row,
+            tr("clinical_home_status_records", self.language),
+            tr("clinical_home_local_record_count", self.language, count=format_dashboard_count(record_count)),
+        )
+        set_dashboard_status_row(
+            self.activity_pending_row,
+            tr("clinical_home_status_pending", self.language),
+            tr("clinical_home_pending_change_count", self.language, count=format_dashboard_count(pending_count)),
+        )
+        set_dashboard_status_row(
+            self.system_redcap_row,
+            tr("clinical_home_system_server", self.language),
+            tr("clinical_home_server_online", self.language)
+            if project
+            else tr("clinical_home_server_offline", self.language),
+        )
+        llm_provider = managed_llm_settings_from_config(getattr(self.runtime, "app_config", None))
+        llm_status = (
+            tr("clinical_home_llm_gateway", self.language)
+            if llm_provider
+            else str(self.runtime.settings.inference.selected_provider or tr("clinical_home_default_status", self.language))
+        )
+        set_dashboard_status_row(self.system_llm_row, tr("clinical_home_system_llm", self.language), llm_status)
+        set_dashboard_status_row(
+            self.system_local_row,
+            tr("clinical_home_system_local_db", self.language),
+            tr("clinical_home_local_db_ready", self.language),
+        )
         configure_dag_switch_combo(self.dag_combo, project_token, self.language)
         self.status_label.style().unpolish(self.status_label)
         self.status_label.style().polish(self.status_label)
         self.user_context_label.style().unpolish(self.user_context_label)
         self.user_context_label.style().polish(self.user_context_label)
+
+    def dashboard_cache_stats(self, project_token: RedcapProjectToken | None) -> tuple[int, int, str]:
+        if project_token is None:
+            return 0, 0, ""
+        try:
+            from data_entry_store import DataEntryStore
+            from gui.data_entry_page import data_entry_store_path
+
+            store = DataEntryStore(data_entry_store_path(self.runtime.app_home))
+            store.initialize()
+            with store.connect() as db:
+                record_row = db.execute(
+                    """
+                    WITH records AS (
+                        SELECT project_id, record FROM record_sync_state WHERE project_id = ?
+                        UNION
+                        SELECT project_id, record FROM redcap_data_values WHERE project_id = ?
+                        UNION
+                        SELECT project_id, record FROM identity_hash_map WHERE project_id = ?
+                    )
+                    SELECT COUNT(*) AS count FROM records
+                    """,
+                    (project_token.project_id, project_token.project_id, project_token.project_id),
+                ).fetchone()
+                pending_row = db.execute(
+                    "SELECT COUNT(*) AS count FROM pending_changes WHERE project_id = ? AND status = 'queued'",
+                    (project_token.project_id,),
+                ).fetchone()
+                sync_row = db.execute(
+                    "SELECT MAX(last_synced_at) AS value FROM record_sync_state WHERE project_id = ?",
+                    (project_token.project_id,),
+                ).fetchone()
+            record_count = int(record_row["count"] or 0) if record_row is not None else 0
+            pending_count = int(pending_row["count"] or 0) if pending_row is not None else 0
+            last_sync = compact_datetime_text(str(sync_row["value"] or "")) if sync_row is not None else ""
+            return record_count, pending_count, last_sync
+        except Exception:
+            return 0, 0, ""
 
 
 class ClinicalRedcapPage:
@@ -1632,6 +1834,113 @@ def build_workflow_card(title: str, body: str, primary_label: str, primary_actio
     button.clicked.connect(primary_action)
     layout.addWidget(button)
     return card
+
+
+def build_dashboard_metric_card(label: str, value_label: Any, note: str):
+    from PySide6.QtWidgets import QFrame, QLabel, QVBoxLayout
+
+    card = QFrame()
+    card.setObjectName("DashboardMetricCard")
+    layout = QVBoxLayout(card)
+    layout.setContentsMargins(16, 14, 16, 14)
+    layout.setSpacing(6)
+    caption = QLabel(label)
+    caption.setObjectName("DashboardMetricCaption")
+    caption.setWordWrap(True)
+    value_label.setObjectName("DashboardMetricValue")
+    value_label.setWordWrap(True)
+    note_label = QLabel(note)
+    note_label.setObjectName("DashboardMetricNote")
+    note_label.setWordWrap(True)
+    layout.addWidget(caption)
+    layout.addWidget(value_label)
+    layout.addWidget(note_label)
+    return card
+
+
+def build_dashboard_action_card(
+    *,
+    code: str,
+    title: str,
+    body: str,
+    primary_label: str,
+    primary_action: Callable[[], None],
+):
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout
+
+    card = QFrame()
+    card.setObjectName("DashboardActionCard")
+    layout = QVBoxLayout(card)
+    layout.setContentsMargins(16, 16, 16, 14)
+    layout.setSpacing(10)
+    heading = QHBoxLayout()
+    heading.setContentsMargins(0, 0, 0, 0)
+    heading.setSpacing(9)
+    badge = QLabel(code)
+    badge.setObjectName("DashboardActionBadge")
+    badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    heading.addWidget(badge, 0, Qt.AlignmentFlag.AlignTop)
+    title_label = QLabel(title)
+    title_label.setObjectName("DashboardActionTitle")
+    title_label.setWordWrap(True)
+    heading.addWidget(title_label, 1)
+    layout.addLayout(heading)
+    body_label = QLabel(body)
+    body_label.setObjectName("DashboardActionBody")
+    body_label.setWordWrap(True)
+    layout.addWidget(body_label)
+    layout.addStretch(1)
+    button = QPushButton(primary_label)
+    button.setObjectName("DashboardActionButton")
+    button.clicked.connect(primary_action)
+    layout.addWidget(button)
+    return card
+
+
+def build_dashboard_status_row(label: str, value: str):
+    from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel
+
+    row = QFrame()
+    row.setObjectName("DashboardStatusRow")
+    layout = QHBoxLayout(row)
+    layout.setContentsMargins(0, 0, 0, 0)
+    layout.setSpacing(8)
+    label_widget = QLabel(label)
+    label_widget.setObjectName("DashboardStatusLabel")
+    label_widget.setWordWrap(True)
+    value_widget = QLabel(value)
+    value_widget.setObjectName("DashboardStatusValue")
+    value_widget.setWordWrap(True)
+    layout.addWidget(label_widget, 1)
+    layout.addWidget(value_widget, 0)
+    row.dashboard_label_widget = label_widget
+    row.dashboard_value_widget = value_widget
+    return row
+
+
+def set_dashboard_status_row(row: Any, label: str, value: str) -> None:
+    label_widget = getattr(row, "dashboard_label_widget", None)
+    value_widget = getattr(row, "dashboard_value_widget", None)
+    if label_widget is not None:
+        label_widget.setText(label)
+    if value_widget is not None:
+        value_widget.setText(value)
+
+
+def format_dashboard_count(value: int) -> str:
+    return f"{int(value):,}".replace(",", ".")
+
+
+def compact_datetime_text(value: str) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    if "T" in text:
+        text = text.replace("T", " ")
+    if len(text) >= 16:
+        return text[:16]
+    return text
 
 
 def build_redcap_token_secret_name(project_id: str | None) -> str:

@@ -157,7 +157,10 @@ class ClinicalDataEntryPage:
         header_layout.addWidget(project_status_group)
         layout.addWidget(header)
 
-        toolbar = QHBoxLayout()
+        toolbar_shell = QFrame()
+        toolbar_shell.setObjectName("DataEntryToolbar")
+        toolbar = QHBoxLayout(toolbar_shell)
+        toolbar.setContentsMargins(12, 10, 12, 10)
         toolbar.setSpacing(10)
         self.sync_button = QPushButton(tr("data_entry_sync", self.language))
         self.sync_button.clicked.connect(lambda: self.start_sync())
@@ -174,7 +177,7 @@ class ClinicalDataEntryPage:
         toolbar.addWidget(self.refresh_button)
         toolbar.addWidget(self.new_record_button)
         toolbar.addWidget(self.search_input, 1)
-        layout.addLayout(toolbar)
+        layout.addWidget(toolbar_shell)
 
         self.sync_progress = QProgressBar()
         self.sync_progress.setRange(0, 0)
@@ -205,6 +208,11 @@ class ClinicalDataEntryPage:
         activity_layout.addLayout(activity_text_layout, 1)
         layout.addWidget(self.activity_panel)
 
+        workspace_shell = QFrame()
+        workspace_shell.setObjectName("DataEntryWorkspaceShell")
+        workspace_layout = QVBoxLayout(workspace_shell)
+        workspace_layout.setContentsMargins(10, 10, 10, 10)
+        workspace_layout.setSpacing(0)
         splitter = QSplitter()
         splitter.setOrientation(Qt.Orientation.Horizontal)
         self.record_list = QListWidget()
@@ -239,7 +247,8 @@ class ClinicalDataEntryPage:
         splitter.addWidget(right_panel)
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
-        layout.addWidget(splitter, 1)
+        workspace_layout.addWidget(splitter, 1)
+        layout.addWidget(workspace_shell, 1)
 
         self.refresh_project_state()
 

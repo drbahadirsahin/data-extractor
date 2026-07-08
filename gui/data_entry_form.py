@@ -136,22 +136,28 @@ class DataEntryFormWidget:
         self._updating_calculations = False
         self.model = model
 
+        header_frame = QFrame()
+        header_frame.setObjectName("DataEntryFormHeader")
+        header_layout = QVBoxLayout(header_frame)
+        header_layout.setContentsMargins(14, 12, 14, 12)
+        header_layout.setSpacing(2)
         header = QLabel(model.title)
         header.setObjectName("DataEntryRecordTitle")
         header.setWordWrap(True)
-        self.layout.addWidget(header)
+        header_layout.addWidget(header)
+        self.layout.addWidget(header_frame)
         if len(model.sections) > 1 or self.repeat_actions:
             shell = QFrame()
             shell.setObjectName("DataEntryFormShell")
             shell_layout = QHBoxLayout(shell)
             shell_layout.setContentsMargins(0, 0, 0, 0)
-            shell_layout.setSpacing(14)
+            shell_layout.setSpacing(12)
 
             form_nav = QScrollArea()
             form_nav.setObjectName("DataEntryFormNavScroll")
             form_nav.setWidgetResizable(True)
-            form_nav.setMinimumWidth(320)
-            form_nav.setMaximumWidth(420)
+            form_nav.setMinimumWidth(300)
+            form_nav.setMaximumWidth(380)
             form_nav.setFrameShape(QFrame.Shape.NoFrame)
             form_nav.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
@@ -160,8 +166,8 @@ class DataEntryFormWidget:
             nav_body.setMinimumWidth(0)
             nav_body.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
             nav_layout = QVBoxLayout(nav_body)
-            nav_layout.setContentsMargins(8, 8, 8, 8)
-            nav_layout.setSpacing(6)
+            nav_layout.setContentsMargins(10, 10, 10, 10)
+            nav_layout.setSpacing(7)
             form_nav.setWidget(nav_body)
 
             form_stack = QStackedWidget()
@@ -413,8 +419,8 @@ class DataEntryFormWidget:
         frame.setObjectName("DataEntryFormSection")
         frame.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
         layout = QVBoxLayout(frame)
-        layout.setContentsMargins(16, 16, 16, 16)
-        layout.setSpacing(10)
+        layout.setContentsMargins(18, 18, 18, 18)
+        layout.setSpacing(12)
         layout.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
         if show_title:
             if getattr(section, "event_label", ""):
@@ -456,7 +462,7 @@ class DataEntryFormWidget:
 
         field_grid = QGridLayout()
         field_grid.setContentsMargins(0, 0, 0, 0)
-        field_grid.setHorizontalSpacing(14)
+        field_grid.setHorizontalSpacing(12)
         field_grid.setVerticalSpacing(10)
         field_grid.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
         row_index = 0
@@ -487,8 +493,8 @@ class DataEntryFormWidget:
         group.setObjectName("DataEntryFormSubsectionBlock")
         group.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
         layout = QVBoxLayout(group)
-        layout.setContentsMargins(14, 12, 14, 14)
-        layout.setSpacing(10)
+        layout.setContentsMargins(16, 14, 16, 16)
+        layout.setSpacing(11)
         layout.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
 
         header = QLabel(str(title or "").strip())

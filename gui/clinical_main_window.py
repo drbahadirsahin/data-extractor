@@ -95,10 +95,10 @@ class ClinicalMainWindow:
 
         sidebar = QWidget()
         sidebar.setObjectName("ClinicalSidebar")
-        sidebar.setFixedWidth(272)
+        sidebar.setFixedWidth(292)
         sidebar_layout = QVBoxLayout(sidebar)
-        sidebar_layout.setContentsMargins(18, 18, 18, 18)
-        sidebar_layout.setSpacing(10)
+        sidebar_layout.setContentsMargins(20, 22, 20, 20)
+        sidebar_layout.setSpacing(9)
 
         brand = QLabel(tr("clinical_brand", self.language))
         brand.setObjectName("AppBrand")
@@ -160,6 +160,7 @@ class ClinicalMainWindow:
         for page in self.pages:
             button = QPushButton(tr(page.label_key, self.language))
             button.setProperty("nav", True)
+            button.setMinimumHeight(44)
             button.clicked.connect(lambda checked=False, key=page.key: self.set_page(key))
             self.nav_buttons[page.key] = button
             sidebar_layout.addWidget(button)
@@ -177,9 +178,10 @@ class ClinicalMainWindow:
         sidebar_layout.addWidget(version_label)
 
         content = QWidget()
+        content.setObjectName("ClinicalContent")
         content_layout = QVBoxLayout(content)
-        content_layout.setContentsMargins(26, 22, 26, 22)
-        content_layout.setSpacing(18)
+        content_layout.setContentsMargins(28, 24, 28, 24)
+        content_layout.setSpacing(16)
         content_layout.addWidget(self.stack)
 
         layout.addWidget(sidebar)
@@ -191,6 +193,7 @@ class ClinicalMainWindow:
 
     def build_scroll_page(self, widget: Any, scroll_area_cls: Any, frame_cls: Any, qt_cls: Any) -> Any:
         scroll = scroll_area_cls()
+        scroll.setObjectName("ClinicalPageScroll")
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(frame_cls.Shape.NoFrame)
         scroll.setHorizontalScrollBarPolicy(qt_cls.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -640,8 +643,8 @@ class ClinicalHomePage:
         band = QFrame()
         band.setObjectName("TopBand")
         band_layout = QHBoxLayout(band)
-        band_layout.setContentsMargins(18, 16, 18, 16)
-        band_layout.setSpacing(16)
+        band_layout.setContentsMargins(22, 20, 22, 20)
+        band_layout.setSpacing(18)
 
         text_group = QVBoxLayout()
         title = QLabel(tr("clinical_home_title", self.language))
@@ -673,7 +676,9 @@ class ClinicalHomePage:
         layout.addWidget(band)
 
         grid = QGridLayout()
-        grid.setSpacing(16)
+        grid.setSpacing(14)
+        grid.setColumnStretch(0, 1)
+        grid.setColumnStretch(1, 1)
         grid.addWidget(
             build_workflow_card(
                 title=tr("clinical_card_redcap_title", self.language),
@@ -782,19 +787,25 @@ class ClinicalRedcapPage:
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(18)
 
+        header = QFrame()
+        header.setObjectName("PageHeader")
+        header_layout = QVBoxLayout(header)
+        header_layout.setContentsMargins(20, 18, 20, 18)
+        header_layout.setSpacing(8)
         title = QLabel(tr("clinical_redcap_title", self.language))
         title.setObjectName("PageTitle")
-        layout.addWidget(title)
+        header_layout.addWidget(title)
         desc = QLabel(tr("clinical_redcap_desc", self.language))
         desc.setObjectName("MutedLabel")
         desc.setWordWrap(True)
-        layout.addWidget(desc)
+        header_layout.addWidget(desc)
+        layout.addWidget(header)
 
         panel = QFrame()
         panel.setObjectName("ConnectionPanel")
         panel_layout = QVBoxLayout(panel)
-        panel_layout.setContentsMargins(18, 18, 18, 18)
-        panel_layout.setSpacing(12)
+        panel_layout.setContentsMargins(22, 22, 22, 22)
+        panel_layout.setSpacing(14)
 
         form = QFormLayout()
         form.setSpacing(10)
@@ -838,7 +849,7 @@ class ClinicalRedcapPage:
         panel_layout.addLayout(buttons)
 
         self.status = QLabel("")
-        self.status.setObjectName("MutedLabel")
+        self.status.setObjectName("WizardStatus")
         self.status.setWordWrap(True)
         panel_layout.addWidget(self.status)
 
@@ -1440,8 +1451,8 @@ class ClinicalImportPage:
         panel = QFrame()
         panel.setObjectName("WizardPanel")
         layout = QVBoxLayout(panel)
-        layout.setContentsMargins(24, 24, 24, 24)
-        layout.setSpacing(12)
+        layout.setContentsMargins(26, 24, 26, 24)
+        layout.setSpacing(13)
         number_label = QLabel(number)
         number_label.setObjectName("StepNumber")
         layout.addWidget(number_label)
@@ -1601,8 +1612,8 @@ def build_workflow_card(title: str, body: str, primary_label: str, primary_actio
     card = QFrame()
     card.setObjectName("WorkflowCard")
     layout = QVBoxLayout(card)
-    layout.setContentsMargins(18, 18, 18, 18)
-    layout.setSpacing(10)
+    layout.setContentsMargins(22, 20, 22, 20)
+    layout.setSpacing(12)
     accent = QFrame()
     accent.setObjectName("AccentStrip")
     accent.setFixedHeight(6)
@@ -1617,6 +1628,7 @@ def build_workflow_card(title: str, body: str, primary_label: str, primary_actio
     layout.addWidget(body_label)
     layout.addStretch(1)
     button = QPushButton(primary_label)
+    button.setMinimumHeight(42)
     button.clicked.connect(primary_action)
     layout.addWidget(button)
     return card

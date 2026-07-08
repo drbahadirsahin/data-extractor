@@ -1,6 +1,6 @@
 CLINICAL_STYLE = """
 QWidget {
-    background: #f6f4ef;
+    background: #fbfaf7;
     color: #17202a;
     font-family: "Avenir Next", "Aptos", "Segoe UI", sans-serif;
     font-size: 14px;
@@ -11,7 +11,7 @@ QLabel {
 }
 
 QDialog {
-    background: #f6f4ef;
+    background: #fbfaf7;
 }
 
 QToolTip {
@@ -23,11 +23,11 @@ QToolTip {
 }
 
 QMainWindow#ClinicalMainWindow {
-    background: #f6f4ef;
+    background: #fbfaf7;
 }
 
 QWidget#ClinicalContent {
-    background: #f6f4ef;
+    background: #fbfaf7;
 }
 
 QScrollArea#ClinicalPageScroll {
@@ -36,8 +36,8 @@ QScrollArea#ClinicalPageScroll {
 }
 
 QWidget#ClinicalSidebar {
-    background: #071923;
-    border-right: 1px solid #071923;
+    background: #071927;
+    border-right: 1px solid #071927;
 }
 
 QFrame#SidebarBrandBlock {
@@ -51,41 +51,63 @@ QLabel#SidebarAppMark {
     color: #ffffff;
     border: 1px solid #3ed5c7;
     border-radius: 8px;
-    min-width: 38px;
-    max-width: 38px;
-    min-height: 38px;
-    max-height: 38px;
+    min-width: 36px;
+    max-width: 36px;
+    min-height: 36px;
+    max-height: 36px;
     font-size: 11px;
     font-weight: 850;
 }
 
 QLabel#SidebarVersionHint {
-    color: #8ca6b3;
+    color: #8aa3b2;
     font-size: 11px;
     font-weight: 650;
 }
 
 QFrame#TopBand, QFrame#PageHeader {
-    background: #fffdf9;
-    border: 1px solid #e3ded5;
-    border-radius: 8px;
+    background: #ffffff;
+    border: 1px solid #e6e1d8;
+    border-radius: 11px;
+}
+
+QFrame#PageContextCard {
+    background: #f2fbf8;
+    border: 1px solid #b7e4dc;
+    border-radius: 9px;
+    min-width: 250px;
 }
 
 QFrame#WorkflowCard, QFrame#ConnectionPanel, QFrame#InfoPanel, QFrame#WizardPanel, QFrame#GuidancePanel, QFrame#PanelCard, QFrame#HeroCard {
-    background: #fffdf9;
-    border: 1px solid #e3ded5;
-    border-radius: 8px;
+    background: #ffffff;
+    border: 1px solid #e6e1d8;
+    border-radius: 11px;
 }
 
-QFrame#DashboardHeader {
-    background: #fffdf9;
-    border: 1px solid #e3ded5;
+QFrame#ConnectionInnerCard {
+    background: #ffffff;
+    border: 1px solid #ece7df;
     border-radius: 10px;
 }
 
+QLabel#ReadonlyInfoValue {
+    background: #f8faf9;
+    color: #20303b;
+    border: 1px solid #e3ded5;
+    border-radius: 7px;
+    padding: 9px 10px;
+    font-weight: 650;
+}
+
+QFrame#DashboardHeader {
+    background: #ffffff;
+    border: 1px solid #e6e1d8;
+    border-radius: 11px;
+}
+
 QFrame#DashboardContextCard {
-    background: #f1fbf8;
-    border: 1px solid #b9e4dc;
+    background: #f2fbf8;
+    border: 1px solid #b7e4dc;
     border-radius: 9px;
     min-width: 250px;
 }
@@ -97,8 +119,8 @@ QLabel#DashboardEyebrow {
 }
 
 QFrame#DashboardMetricCard {
-    background: #fffdf9;
-    border: 1px solid #e3ded5;
+    background: #ffffff;
+    border: 1px solid #e6e1d8;
     border-radius: 9px;
     min-height: 88px;
 }
@@ -127,8 +149,8 @@ QLabel#DashboardSectionTitle {
 }
 
 QFrame#DashboardActionCard {
-    background: #fffdf9;
-    border: 1px solid #e3ded5;
+    background: #ffffff;
+    border: 1px solid #e6e1d8;
     border-radius: 10px;
     min-height: 150px;
 }
@@ -177,8 +199,8 @@ QPushButton#DashboardActionButton:hover {
 }
 
 QFrame#DashboardPanel {
-    background: #fffdf9;
-    border: 1px solid #e3ded5;
+    background: #ffffff;
+    border: 1px solid #e6e1d8;
     border-radius: 10px;
 }
 
@@ -217,8 +239,8 @@ QFrame#Stepper {
 
 QLabel#AppBrand {
     color: #ffffff;
-    font-size: 21px;
-    font-weight: 780;
+    font-size: 16px;
+    font-weight: 820;
     padding-bottom: 2px;
 }
 
@@ -257,7 +279,7 @@ QLabel#MutedLabel {
 }
 
 QLabel#SmallMutedLabel {
-    color: #a7b9c2;
+    color: #9fb4c1;
 }
 
 QLabel#SmallMutedLabel {
@@ -400,18 +422,27 @@ QPushButton[secondary="true"]:hover {
 
 QPushButton[nav="true"] {
     background: transparent;
-    color: #d0dde3;
+    color: #c8d7df;
     border: 1px solid transparent;
-    border-left: 4px solid transparent;
+    border-left: 3px solid transparent;
+    border-radius: 8px;
     text-align: left;
-    padding: 10px 13px;
+    padding: 9px 12px;
+    font-size: 13px;
+    min-height: 22px;
 }
 
 QPushButton[nav="true"][active="true"] {
-    background: #18313a;
+    background: #0b8f84;
     color: #ffffff;
-    border: 1px solid #315160;
-    border-left: 4px solid #75d7c8;
+    border: 1px solid #0b8f84;
+    border-left: 3px solid #9ef0e4;
+}
+
+QPushButton[nav="true"]:hover {
+    background: #102f3f;
+    color: #ffffff;
+    border: 1px solid #1d4051;
 }
 
 QPushButton[quiet="true"] {
@@ -489,16 +520,17 @@ QLineEdit#DataEntryDateLineEdit {
 }
 
 QComboBox#SidebarProjectCombo {
-    background: #edf8f4;
-    color: #0b746b;
-    border: 1px solid #b7dfd5;
-    border-radius: 8px;
-    padding: 8px 10px;
-    font-weight: 650;
+    background: #0b8f84;
+    color: #ffffff;
+    border: 1px solid #17b0a3;
+    border-radius: 9px;
+    padding: 10px 11px;
+    font-weight: 780;
+    min-height: 28px;
 }
 
 QComboBox#SidebarProjectCombo:disabled {
-    background: #fff5e5;
+    background: #fff3df;
     color: #9a5718;
     border: 1px solid #f1cf9d;
 }

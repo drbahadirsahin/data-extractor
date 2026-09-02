@@ -124,6 +124,34 @@ class DataEntryFormModelTests(unittest.TestCase):
         self.assertEqual([section.title for section in model.sections], ["hasta_bilgileri", "hasta_bilgileri"])
         self.assertEqual([section.fields[0].event_id for section in model.sections], ["baseline_arm_1", "followup_arm_1"])
 
+    def test_uses_redcap_event_order_instead_of_data_dictionary_form_order(self) -> None:
+        detail = RecordDetail(project_id="17", record="1")
+        fields = {
+            "followup_form": [FieldSpec("followup_value", "followup_form", "text", "Follow-up")],
+            "baseline_form": [FieldSpec("baseline_value", "baseline_form", "text", "Baseline")],
+        }
+
+        model = build_form_render_model(
+            detail,
+            fields,
+            event_labels={
+                "baseline_arm_1": "Başlangıç",
+                "followup_arm_1": "İzlem",
+            },
+            form_event_map={
+                "followup_form": ["followup_arm_1"],
+                "baseline_form": ["baseline_arm_1"],
+            },
+        )
+
+        self.assertEqual(
+            [(section.event_id, section.form_name) for section in model.sections],
+            [
+                ("baseline_arm_1", "baseline_form"),
+                ("followup_arm_1", "followup_form"),
+            ],
+        )
+
     def test_form_event_map_is_authoritative_when_values_appear_in_other_events(self) -> None:
         detail = RecordDetail(
             project_id="17",
@@ -210,7 +238,7 @@ class DataEntryFormModelTests(unittest.TestCase):
             ],
         )
 
-    def test_empty_repeating_event_still_renders_first_instance_for_entry(self) -> None:
+    def test_empty_repeating_event_does_not_fabricate_first_instance(self) -> None:
         detail = RecordDetail(project_id="17", record="1")
         fields = {
             "event_repeat_form": [FieldSpec("event_repeat", "event_repeat_form", "text", "Event Repeat")],
@@ -223,14 +251,9 @@ class DataEntryFormModelTests(unittest.TestCase):
             repeating_events=["event_2"],
         )
 
-        self.assertEqual(len(model.sections), 1)
-        self.assertEqual(model.sections[0].form_name, "event_repeat_form")
-        self.assertEqual(model.sections[0].event_id, "event_2")
-        self.assertEqual(model.sections[0].instance, "1")
-        self.assertEqual(model.sections[0].fields[0].event_id, "event_2")
-        self.assertEqual(model.sections[0].fields[0].instance, "1")
+        self.assertEqual(model.sections, [])
 
-    def test_form_repeating_inside_empty_repeating_event_renders_first_form_instance(self) -> None:
+    def test_empty_repeating_form_and_event_do_not_fabricate_first_instance(self) -> None:
         detail = RecordDetail(project_id="17", record="1")
         fields = {
             "mr_trus_fzyon_biyopsi": [
@@ -246,16 +269,9 @@ class DataEntryFormModelTests(unittest.TestCase):
             repeating_events=["mr_trus_fzyon_biyopsi_arm_1"],
         )
 
-        self.assertEqual(len(model.sections), 1)
-        section = model.sections[0]
-        self.assertEqual(section.form_name, "mr_trus_fzyon_biyopsi")
-        self.assertEqual(section.event_id, "mr_trus_fzyon_biyopsi_arm_1")
-        self.assertEqual(section.repeat_instrument, "mr_trus_fzyon_biyopsi")
-        self.assertEqual(section.instance, "1")
-        self.assertEqual(section.fields[0].repeat_instrument, "mr_trus_fzyon_biyopsi")
-        self.assertEqual(section.fields[0].instance, "1")
+        self.assertEqual(model.sections, [])
 
-    def test_empty_event_with_only_repeating_forms_renders_first_form_instances(self) -> None:
+    def test_empty_event_with_only_repeating_forms_has_no_phantom_instances(self) -> None:
         detail = RecordDetail(project_id="17", record="1")
         fields = {
             "mr_trus_fzyon_biyopsi": [
@@ -279,25 +295,9 @@ class DataEntryFormModelTests(unittest.TestCase):
             },
         )
 
-        self.assertEqual(
-            [(section.form_name, section.event_id, section.repeat_instrument, section.instance) for section in model.sections],
-            [
-                (
-                    "mr_trus_fzyon_biyopsi",
-                    "mr_trus_fzyon_biyo_arm_1",
-                    "mr_trus_fzyon_biyopsi",
-                    "1",
-                ),
-                (
-                    "mr_trus_fzyon_biyopsi_lezyon",
-                    "mr_trus_fzyon_biyo_arm_1",
-                    "mr_trus_fzyon_biyopsi_lezyon",
-                    "1",
-                ),
-            ],
-        )
+        self.assertEqual(model.sections, [])
 
-    def test_repeating_form_sibling_stays_visible_after_one_form_is_saved(self) -> None:
+    def test_repeating_form_sibling_is_not_fabricated_after_one_form_is_saved(self) -> None:
         detail = RecordDetail(
             project_id="17",
             record="1",
@@ -342,11 +342,9 @@ class DataEntryFormModelTests(unittest.TestCase):
             [(section.form_name, section.repeat_instrument, section.instance) for section in model.sections],
             [
                 ("mr_trus_fzyon_biyopsi", "mr_trus_fzyon_biyopsi", "1"),
-                ("mr_trus_fzyon_biyopsi_lezyon", "mr_trus_fzyon_biyopsi_lezyon", "1"),
             ],
         )
         self.assertEqual(model.sections[0].fields[0].value, "2026-06-01")
-        self.assertFalse(model.sections[1].fields[0].present)
 
     def test_repeating_form_instances_do_not_create_blank_sibling_instances(self) -> None:
         detail = RecordDetail(
@@ -438,6 +436,33 @@ class DataEntryFormModelTests(unittest.TestCase):
         self.assertEqual(model.sections[0].repeat_instrument, "tan_laboratuvar_sonucu")
         self.assertEqual(model.sections[0].instance, "1")
         self.assertFalse(model.sections[0].fields[0].present)
+
+    def test_maps_redcap_form_completion_value_into_section_status(self) -> None:
+        detail = RecordDetail(
+            project_id="17",
+            record="1",
+            forms=[
+                RecordFormSection(
+                    form_name="records",
+                    fields=[
+                        RecordFieldValue(field_name="hasta_ad", value="AB", event_id="baseline_arm_1"),
+                        RecordFieldValue(
+                            field_name="hasta_bilgileri_complete",
+                            value="1",
+                            event_id="baseline_arm_1",
+                        ),
+                    ],
+                )
+            ],
+        )
+        model = build_form_render_model(
+            detail,
+            {"hasta_bilgileri": [FieldSpec("hasta_ad", "hasta_bilgileri", "text", "Ad")]},
+            form_event_map={"hasta_bilgileri": ["baseline_arm_1"]},
+        )
+
+        self.assertEqual(model.sections[0].completion_status, "1")
+        self.assertTrue(model.sections[0].completion_present)
 
     def test_maps_readonly_and_descriptive_fields(self) -> None:
         detail = RecordDetail(

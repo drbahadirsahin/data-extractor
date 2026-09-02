@@ -19,7 +19,7 @@ from excel_import import (
 from gui.i18n import tr
 from gui.extraction_worker import PendingPatientJob, PatientQueueExtractionWorker
 from gui.view_models import provider_label_for_key
-from llm_settings import managed_llm_settings_from_config
+from llm_settings import DEFAULT_OPENROUTER_MODEL, managed_llm_settings_from_config
 from llm_provider import API_KEY_PROVIDER_NAMES, can_resolve_api_key, merge_llm_settings
 from project_config import ProjectConfig
 from release_profile import show_model_settings
@@ -1103,7 +1103,7 @@ class WorkspacePage:
                 payload = {
                     "provider": "openai_compatible",
                     "base_url": base_url,
-                    "model": model_input.text().strip() or "qwen/qwen3.5-9b",
+                    "model": model_input.text().strip() or DEFAULT_OPENROUTER_MODEL,
                     "temperature": float(temperature_input.value()),
                     "max_tokens": int(max_tokens_input.value()),
                     "timeout_seconds": int(timeout_input.value()),
@@ -2202,6 +2202,75 @@ class WorkspacePage:
         self.document_list.clear()
         self.queue_status.setText(tr("no_documents", self.language))
 
+    def enqueue_patient_documents(
+        self,
+        *,
+        queue_label: str,
+        patient_mode: str,
+        identifier_type: str | None,
+        identifier_value: str | None,
+        documents: list[str],
+    ) -> tuple[bool, str]:
+        if not self.bundle:
+            return False, tr("workspace_no_redcap_projects", self.language)
+
+        normalized_documents: list[str] = []
+        seen_documents: set[str] = set()
+        for document in documents:
+            path = str(document)
+            if not path.strip() or path in seen_documents:
+                continue
+            seen_documents.add(path)
+            normalized_documents.append(path)
+        if not normalized_documents:
+            return False, tr("patient_queue_requires_documents", self.language)
+
+        normalized_mode = str(patient_mode or "").strip().lower()
+        if normalized_mode not in {"new", "existing"}:
+            return False, f"Unsupported patient mode: {patient_mode!r}."
+
+        normalized_identifier_type: str | None = None
+        normalized_identifier_value: str | None = None
+        if normalized_mode == "existing":
+            normalized_identifier_type = str(identifier_type or "record_id").strip() or "record_id"
+            normalized_identifier_value = str(identifier_value or "").strip()
+            if not normalized_identifier_value:
+                return False, tr("patient_identifier_required", self.language)
+
+        if normalized_mode == "new":
+            self.ensure_tc_identifier_append_field()
+            default_label = tr(
+                "patient_queue_new_summary",
+                self.language,
+                count=len(normalized_documents),
+            )
+        else:
+            default_label = tr(
+                "patient_queue_existing_summary",
+                self.language,
+                identifier_type=normalized_identifier_type or "record_id",
+                identifier_value=normalized_identifier_value or "",
+                count=len(normalized_documents),
+            )
+
+        config_snapshot = build_scoped_project_config(
+            self.bundle,
+            self.selected_form_names,
+            self.selected_field_names,
+        )
+        self.patient_queue_items.append(
+            PendingPatientJob(
+                queue_label=queue_label.strip() or default_label,
+                patient_mode=normalized_mode,
+                identifier_type=normalized_identifier_type,
+                identifier_value=normalized_identifier_value,
+                documents=normalized_documents,
+                config_snapshot=config_snapshot,
+            )
+        )
+        self.refresh_patient_queue_list()
+        return True, ""
+
     def add_patient_to_queue(self) -> None:
         from PySide6.QtWidgets import (
             QComboBox,
@@ -2274,38 +2343,20 @@ class WorkspacePage:
             identifier_value = identifier_value_input.text().strip() if patient_mode == "existing" else None
             queue_label = queue_label_input.text().strip()
 
-            if patient_mode == "existing" and not identifier_value:
+            queued, message = self.enqueue_patient_documents(
+                queue_label=queue_label,
+                patient_mode=patient_mode,
+                identifier_type=identifier_type,
+                identifier_value=identifier_value,
+                documents=documents,
+            )
+            if not queued:
                 self.show_warning(
                     tr("patient_queue", self.language),
-                    tr("patient_identifier_required", self.language),
+                    message,
                     dialog,
                 )
                 return
-
-            if patient_mode == "new":
-                self.ensure_tc_identifier_append_field()
-                default_label = tr("patient_queue_new_summary", self.language, count=len(documents))
-            else:
-                default_label = tr(
-                    "patient_queue_existing_summary",
-                    self.language,
-                    identifier_type=identifier_type or "record_id",
-                    identifier_value=identifier_value or "",
-                    count=len(documents),
-                )
-
-            config_snapshot = build_scoped_project_config(self.bundle, self.selected_form_names, self.selected_field_names)
-            self.patient_queue_items.append(
-                PendingPatientJob(
-                    queue_label=queue_label or default_label,
-                    patient_mode=patient_mode,
-                    identifier_type=identifier_type,
-                    identifier_value=identifier_value,
-                    documents=list(documents),
-                    config_snapshot=config_snapshot,
-                )
-            )
-            self.refresh_patient_queue_list()
             self.clear_document_draft()
             dialog.accept()
 
@@ -2447,47 +2498,24 @@ class WorkspacePage:
 
         def validate_and_accept() -> None:
             documents = [document_list.item(index).text() for index in range(document_list.count())]
-            if not documents:
-                self.show_warning(
-                    tr("patient_queue", self.language),
-                    tr("patient_queue_requires_documents", self.language),
-                    dialog,
-                )
-                return
             patient_mode = str(patient_mode_input.currentData())
             identifier_type = str(identifier_type_input.currentData()) if patient_mode == "existing" else None
             identifier_value = identifier_value_input.text().strip() if patient_mode == "existing" else None
-            if patient_mode == "existing" and not identifier_value:
+            queue_label = queue_label_input.text().strip()
+            queued, message = self.enqueue_patient_documents(
+                queue_label=queue_label,
+                patient_mode=patient_mode,
+                identifier_type=identifier_type,
+                identifier_value=identifier_value,
+                documents=documents,
+            )
+            if not queued:
                 self.show_warning(
                     tr("patient_queue", self.language),
-                    tr("patient_identifier_required", self.language),
+                    message,
                     dialog,
                 )
                 return
-            queue_label = queue_label_input.text().strip()
-            if patient_mode == "new":
-                self.ensure_tc_identifier_append_field()
-                default_label = tr("patient_queue_new_summary", self.language, count=len(documents))
-            else:
-                default_label = tr(
-                    "patient_queue_existing_summary",
-                    self.language,
-                    identifier_type=identifier_type or "record_id",
-                    identifier_value=identifier_value or "",
-                    count=len(documents),
-                )
-            config_snapshot = build_scoped_project_config(self.bundle, self.selected_form_names, self.selected_field_names)
-            self.patient_queue_items.append(
-                PendingPatientJob(
-                    queue_label=queue_label or default_label,
-                    patient_mode=patient_mode,
-                    identifier_type=identifier_type,
-                    identifier_value=identifier_value,
-                    documents=list(documents),
-                    config_snapshot=config_snapshot,
-                )
-            )
-            self.refresh_patient_queue_list()
             accepted["value"] = True
             dialog.accept()
 
@@ -2655,7 +2683,7 @@ class WorkspacePage:
             return {
                 "provider": "openai_compatible",
                 "base_url": inference.openai_compatible_base_url or "",
-                "model": inference.openai_compatible_model or "qwen/qwen3.5-9b",
+                "model": inference.openai_compatible_model or DEFAULT_OPENROUTER_MODEL,
                 "temperature": 0,
                 "max_tokens": 8192,
                 "timeout_seconds": int(inference.timeout_seconds),

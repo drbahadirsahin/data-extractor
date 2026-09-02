@@ -12,12 +12,14 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from data_entry_store import DataEntryStore, RedcapDataValue
 from gui.data_entry_page import (
     ClinicalDataEntryPage,
+    DataEntryAIFillBridge,
     active_project_dag_identifiers,
     apply_ai_fill_overrides,
     build_data_entry_ai_config,
     data_entry_store_path,
     merged_override_payload,
     repeat_context_options,
+    reusable_repeat_section_index,
 )
 from data_entry_form_model import FormFieldModel, FormRenderModel, FormSectionModel
 from project_config import ProjectConfig
@@ -68,6 +70,45 @@ class FakeRedcapClient:
 
 
 class GuiDataEntryPageTests(unittest.TestCase):
+    def test_field_change_recovers_form_actions_without_enabling_ai_during_fill(self) -> None:
+        get_qapplication()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app_home = Path(temp_dir)
+            config_path = write_project_config(app_home)
+            store = DataEntryStore(data_entry_store_path(app_home))
+            store.initialize()
+            store.upsert_remote_values(
+                [
+                    RedcapDataValue(
+                        project_id="17",
+                        event_id="",
+                        record="1",
+                        field_name="hasta_ad",
+                        value="AB",
+                    )
+                ]
+            )
+            page = ClinicalDataEntryPage(build_runtime(app_home, config_path))
+            page.record_list.setCurrentRow(0)
+
+            self.assertIsNotNone(page.current_model)
+            self.assertIsNotNone(page.form_widget.current_section())
+            page.set_form_actions_enabled(False)
+            page.form_widget.editor_widgets["hasta_ad"].setText("CD")
+
+            self.assertTrue(page.ai_fill_button.isEnabled())
+            self.assertTrue(page.save_button.isEnabled())
+            self.assertTrue(page.send_button.isEnabled())
+
+            page._ai_thread = object()
+            page.set_form_actions_enabled(False)
+            page.form_widget.editor_widgets["hasta_ad"].setText("EF")
+
+            self.assertFalse(page.ai_fill_button.isEnabled())
+            self.assertTrue(page.save_button.isEnabled())
+            self.assertTrue(page.send_button.isEnabled())
+            page._ai_thread = None
+
     def test_page_lists_local_records_and_queues_form_changes(self) -> None:
         get_qapplication()
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -150,6 +191,150 @@ class GuiDataEntryPageTests(unittest.TestCase):
             self.assertEqual(page.current_model.record, "1")
             self.assertEqual(page.form_widget.current_section().form_name, "tan_laboratuvar_sonucu")
             self.assertEqual(page.form_widget.collect_values()["psa"], "5.1")
+
+    def test_record_refresh_preserves_open_record_section_and_actions(self) -> None:
+        get_qapplication()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app_home = Path(temp_dir)
+            config_path = write_project_config(app_home, include_laboratory=True)
+            store = DataEntryStore(data_entry_store_path(app_home))
+            store.initialize()
+            store.upsert_remote_values(
+                [
+                    RedcapDataValue(
+                        project_id="17",
+                        event_id="",
+                        record="1",
+                        field_name="hasta_ad",
+                        value="AB",
+                    ),
+                    RedcapDataValue(
+                        project_id="17",
+                        event_id="",
+                        record="1",
+                        field_name="psa",
+                        value="4.2",
+                    ),
+                ]
+            )
+            page = ClinicalDataEntryPage(build_runtime(app_home, config_path))
+            page.record_list.setCurrentRow(0)
+            page.form_widget.select_section(1)
+
+            page.refresh_records()
+
+            self.assertIsNotNone(page.current_model)
+            self.assertIs(page.current_model, page.form_widget.model)
+            self.assertEqual(page.current_model.record, "1")
+            self.assertEqual(page.form_widget.current_section().form_name, "tan_laboratuvar_sonucu")
+            self.assertTrue(page.ai_fill_button.isEnabled())
+            self.assertTrue(page.save_button.isEnabled())
+            self.assertTrue(page.send_button.isEnabled())
+
+    def test_record_refresh_recovers_displayed_model_after_stale_page_state(self) -> None:
+        get_qapplication()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app_home = Path(temp_dir)
+            config_path = write_project_config(app_home)
+            store = DataEntryStore(data_entry_store_path(app_home))
+            store.initialize()
+            store.upsert_remote_values(
+                [
+                    RedcapDataValue(
+                        project_id="17",
+                        event_id="",
+                        record="1",
+                        field_name="hasta_ad",
+                        value="AB",
+                    )
+                ]
+            )
+            page = ClinicalDataEntryPage(build_runtime(app_home, config_path))
+            page.record_list.setCurrentRow(0)
+            self.assertIsNotNone(page.form_widget.model)
+            page.current_model = None
+            page.record_list.clearSelection()
+            page.set_form_actions_enabled(False)
+
+            page.refresh_records()
+
+            self.assertIsNotNone(page.current_model)
+            self.assertIs(page.current_model, page.form_widget.model)
+            self.assertEqual(page.current_model.record, "1")
+            self.assertTrue(page.ai_fill_button.isEnabled())
+            self.assertTrue(page.save_button.isEnabled())
+            self.assertTrue(page.send_button.isEnabled())
+
+    def test_sync_success_preserves_open_record_and_form_actions(self) -> None:
+        get_qapplication()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app_home = Path(temp_dir)
+            config_path = write_project_config(app_home)
+            store = DataEntryStore(data_entry_store_path(app_home))
+            store.initialize()
+            store.upsert_remote_values(
+                [
+                    RedcapDataValue(
+                        project_id="17",
+                        event_id="",
+                        record="1",
+                        field_name="hasta_ad",
+                        value="AB",
+                    )
+                ]
+            )
+            page = ClinicalDataEntryPage(build_runtime(app_home, config_path))
+            page.record_list.setCurrentRow(0)
+
+            page.handle_sync_success(
+                SimpleNamespace(
+                    project_id="17",
+                    manifest_records=1,
+                    pulled_records=[],
+                    conflict_records=[],
+                    values_updated=0,
+                    identity_hashes_updated=0,
+                )
+            )
+
+            self.assertIsNotNone(page.current_model)
+            self.assertIs(page.current_model, page.form_widget.model)
+            self.assertEqual(page.current_model.record, "1")
+            self.assertTrue(page.ai_fill_button.isEnabled())
+            self.assertTrue(page.save_button.isEnabled())
+            self.assertTrue(page.send_button.isEnabled())
+
+    def test_record_refresh_clears_form_when_active_record_is_filtered_out(self) -> None:
+        get_qapplication()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app_home = Path(temp_dir)
+            config_path = write_project_config(app_home)
+            store = DataEntryStore(data_entry_store_path(app_home))
+            store.initialize()
+            store.upsert_remote_values(
+                [
+                    RedcapDataValue(
+                        project_id="17",
+                        event_id="",
+                        record="1",
+                        field_name="hasta_ad",
+                        value="AB",
+                    )
+                ]
+            )
+            page = ClinicalDataEntryPage(build_runtime(app_home, config_path))
+            page.record_list.setCurrentRow(0)
+            page.search_input.setText("not-found")
+
+            page.refresh_records()
+
+            self.assertEqual(page.record_list.count(), 0)
+            self.assertIsNone(page.current_model)
+            self.assertIsNone(page.form_widget.model)
+            self.assertEqual(page.form_widget.editor_widgets, {})
+            self.assertFalse(page.ai_fill_button.isEnabled())
+            self.assertFalse(page.save_button.isEnabled())
+            self.assertFalse(page.send_button.isEnabled())
 
     def test_save_and_send_imports_pending_changes(self) -> None:
         get_qapplication()
@@ -349,6 +534,180 @@ class GuiDataEntryPageTests(unittest.TestCase):
             self.assertFalse(page.sync_button.isEnabled())
             self.assertEqual(page.record_list.count(), 0)
 
+    def test_compact_workspace_hides_record_list_after_selection_and_keeps_sync_accessible(self) -> None:
+        app = get_qapplication()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app_home = Path(temp_dir)
+            config_path = write_project_config(app_home)
+            store = DataEntryStore(data_entry_store_path(app_home))
+            store.initialize()
+            store.upsert_remote_values(
+                [
+                    RedcapDataValue(
+                        project_id="17",
+                        event_id="",
+                        record="1",
+                        field_name="hasta_ad",
+                        value="AB",
+                    )
+                ]
+            )
+            page = ClinicalDataEntryPage(build_runtime(app_home, config_path))
+            page.widget.resize(900, 700)
+            page.widget.show()
+            app.processEvents()
+
+            self.assertEqual(page.sync_button.text(), "Kayıtları senkronize et")
+            self.assertTrue(page.sync_button.isVisible())
+            self.assertTrue(page.record_list_toggle.isVisible())
+            self.assertTrue(page.record_list.isVisible())
+
+            page.record_list.setCurrentRow(0)
+            app.processEvents()
+
+            self.assertFalse(page.record_list.isVisible())
+            page.record_list_toggle.click()
+            self.assertTrue(page.record_list.isVisible())
+
+            page.widget.resize(1120, 700)
+            app.processEvents()
+
+            self.assertFalse(page.record_list_toggle.isVisible())
+            self.assertTrue(page.record_list.isVisible())
+            page.widget.close()
+
+    def test_ai_fill_applies_final_value_even_when_status_defaults_to_not_found(self) -> None:
+        get_qapplication()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app_home = Path(temp_dir)
+            config_path = write_project_config(app_home)
+            store = DataEntryStore(data_entry_store_path(app_home))
+            store.initialize()
+            store.upsert_remote_values(
+                [
+                    RedcapDataValue(
+                        project_id="17",
+                        event_id="",
+                        record="1",
+                        field_name="hasta_ad",
+                        value="AB",
+                    )
+                ]
+            )
+            page = ClinicalDataEntryPage(build_runtime(app_home, config_path))
+            page.record_list.setCurrentRow(0)
+            progress = SimpleNamespace(close=lambda: None)
+            bridge = DataEntryAIFillBridge(
+                page=page,
+                progress=progress,
+                field_names={"hasta_ad"},
+            )
+
+            bridge.handle_finished(
+                {
+                    "results": [
+                        SimpleNamespace(
+                            merged_response=SimpleNamespace(
+                                results=[
+                                    SimpleNamespace(
+                                        field_name="hasta_ad",
+                                        status="not_found",
+                                        final_value="YZ değeri",
+                                    )
+                                ]
+                            )
+                        )
+                    ],
+                    "canceled": False,
+                }
+            )
+
+            self.assertEqual(page.form_widget.editor_widgets["hasta_ad"].text(), "YZ değeri")
+            self.assertEqual(page.activity_panel.property("tone"), "success")
+            self.assertIn("1", page.status_label.text())
+
+    def test_ai_fill_uses_final_value_code_when_display_value_is_missing(self) -> None:
+        get_qapplication()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app_home = Path(temp_dir)
+            config_path = write_project_config(app_home)
+            store = DataEntryStore(data_entry_store_path(app_home))
+            store.initialize()
+            store.upsert_remote_values(
+                [
+                    RedcapDataValue(
+                        project_id="17",
+                        event_id="",
+                        record="1",
+                        field_name="hasta_ad",
+                        value="AB",
+                    )
+                ]
+            )
+            page = ClinicalDataEntryPage(build_runtime(app_home, config_path))
+            page.record_list.setCurrentRow(0)
+            bridge = DataEntryAIFillBridge(
+                page=page,
+                progress=SimpleNamespace(close=lambda: None),
+                field_names={"hasta_ad"},
+            )
+
+            bridge.handle_finished(
+                {
+                    "results": [
+                        SimpleNamespace(
+                            merged_response=SimpleNamespace(
+                                results=[
+                                    SimpleNamespace(
+                                        field_name="hasta_ad",
+                                        status="found",
+                                        final_value=None,
+                                        final_value_code="kod-değeri",
+                                    )
+                                ]
+                            )
+                        )
+                    ],
+                    "canceled": False,
+                }
+            )
+
+            self.assertEqual(page.form_widget.editor_widgets["hasta_ad"].text(), "kod-değeri")
+            self.assertEqual(page.activity_panel.property("tone"), "success")
+
+    def test_ai_fill_empty_or_unapplied_result_is_shown_as_warning(self) -> None:
+        get_qapplication()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app_home = Path(temp_dir)
+            config_path = write_project_config(app_home)
+            page = ClinicalDataEntryPage(build_runtime(app_home, config_path))
+
+            page.handle_ai_fill_success({}, {"hasta_ad"})
+
+            self.assertEqual(page.activity_panel.property("tone"), "warning")
+            self.assertIn("uygulanabilir değer", page.status_label.text())
+
+            page.handle_ai_fill_success({"bilinmeyen_alan": "değer"}, {"bilinmeyen_alan"})
+
+            self.assertEqual(page.activity_panel.property("tone"), "warning")
+            self.assertIn("uygulanabilir değer", page.status_label.text())
+
+    def test_ai_fill_failure_uses_error_activity_without_logging_sensitive_details(self) -> None:
+        get_qapplication()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app_home = Path(temp_dir)
+            config_path = write_project_config(app_home)
+            page = ClinicalDataEntryPage(build_runtime(app_home, config_path))
+            sensitive_error = "Raw response: Hasta TC 12345678901"
+
+            with patch("gui.data_entry_page.logging.error") as log_error:
+                page.handle_ai_fill_failure(sensitive_error)
+
+            self.assertEqual(page.activity_panel.property("tone"), "error")
+            self.assertIn(sensitive_error, page.status_label.text())
+            self.assertTrue(log_error.called)
+            self.assertNotIn("12345678901", str(log_error.call_args))
+
     def test_ai_fill_overrides_merge_temporary_form_and_field_rules(self) -> None:
         config = SimpleNamespace(
             form_overrides={"hasta_bilgileri": {"prompt_append": "Mevcut form kuralı"}},
@@ -395,6 +754,20 @@ class GuiDataEntryPageTests(unittest.TestCase):
             project_id="17",
             dictionary_path="dictionary.csv",
             llm={"provider": "ollama", "model": "local"},
+            append_fields=[
+                {
+                    "field_name": "secilen_ek_alan",
+                    "form_name": "hasta_bilgileri",
+                    "field_type": "text",
+                    "field_label": "Seçilen ek alan",
+                },
+                {
+                    "field_name": "secilmeyen_ek_alan",
+                    "form_name": "hasta_bilgileri",
+                    "field_type": "text",
+                    "field_label": "Seçilmeyen ek alan",
+                },
+            ],
             form_overrides={},
             field_overrides={},
         )
@@ -414,13 +787,18 @@ class GuiDataEntryPageTests(unittest.TestCase):
             runtime=runtime,
             bundle=bundle,
             form_name="hasta_bilgileri",
-            field_names=["hasta_ad"],
+            field_names=["hasta_ad", "secilen_ek_alan", "hasta_ad"],
             form_override={"selection_rule": "latest"},
             field_overrides={"hasta_ad": {"max_candidates": 1}},
         )
 
-        self.assertEqual(scoped.target_forms, ["hasta_bilgileri"])
-        self.assertEqual(scoped.target_fields, ["hasta_ad"])
+        self.assertEqual(scoped.target_forms, [])
+        self.assertEqual(scoped.target_fields, ["hasta_ad", "secilen_ek_alan"])
+        self.assertEqual(
+            [field["field_name"] for field in scoped.append_fields],
+            ["secilen_ek_alan"],
+        )
+        self.assertEqual(len(project_config.append_fields), 2)
         self.assertEqual(scoped.llm["provider"], "llm_gateway")
         self.assertEqual(scoped.form_overrides["hasta_bilgileri"]["selection_rule"], "latest")
         self.assertEqual(scoped.field_overrides["hasta_ad"]["max_candidates"], 1)
@@ -477,10 +855,10 @@ class GuiDataEntryPageTests(unittest.TestCase):
 
         labels = [option["label"] for option in repeat_context_options(model, bundle, "tr")]
 
-        self.assertIn("Event: Klasik Biyopsi #2", labels)
+        self.assertIn("Olay: Klasik Biyopsi #2", labels)
         self.assertIn("Form: Tıbbi Bilgiler & Tanı / Tanı Laboratuvar Sonucu #3", labels)
 
-    def test_repeat_event_option_preserves_form_repeat_context_inside_repeating_event(self) -> None:
+    def test_repeat_options_do_not_merge_event_and_instrument_repeat_contexts(self) -> None:
         config = ProjectConfig(
             project_name="Demo",
             project_id="17",
@@ -511,19 +889,103 @@ class GuiDataEntryPageTests(unittest.TestCase):
             ],
         )
 
-        event_option = next(
-            option
-            for option in repeat_context_options(model, bundle, "tr")
-            if option["kind"] == "event"
-        )
+        options = repeat_context_options(model, bundle, "tr")
 
+        self.assertEqual([option["kind"] for option in options], ["form"])
         self.assertEqual(
-            event_option["contexts_by_form"]["mr_trus_fzyon_biyopsi"],
+            options[0]["contexts_by_form"]["mr_trus_fzyon_biyopsi"],
             ("mr_trus_fzyon_biyopsi_arm_1", "mr_trus_fzyon_biyopsi", "2"),
         )
+
+    def test_next_event_instance_ignores_repeating_instrument_instances(self) -> None:
+        config = ProjectConfig(
+            project_name="Demo",
+            project_id="17",
+            dictionary_path="dictionary.csv",
+            form_labels={"event_form": "Event Form", "repeat_form": "Repeat Form"},
+            event_labels={"followup_arm_1": "Follow-up"},
+            form_event_map={
+                "event_form": ["followup_arm_1"],
+                "repeat_form": ["followup_arm_1"],
+            },
+            repeating_events=["followup_arm_1"],
+            repeating_form_event_map={"repeat_form": ["followup_arm_1"]},
+        )
+        bundle = SimpleNamespace(
+            config=config,
+            grouped_fields={
+                "event_form": [SimpleNamespace(field_name="event_value")],
+                "repeat_form": [SimpleNamespace(field_name="repeat_value")],
+            },
+        )
+        model = FormRenderModel(
+            project_id="17",
+            record="1",
+            title="Record 1",
+            sections=[
+                FormSectionModel(
+                    form_name="event_form",
+                    title="Event Form",
+                    event_id="followup_arm_1",
+                    instance="1",
+                    fields=[FormFieldModel("event_value", "event_form", "Value", "text", "A")],
+                ),
+                FormSectionModel(
+                    form_name="repeat_form",
+                    title="Repeat Form",
+                    event_id="followup_arm_1",
+                    repeat_instrument="repeat_form",
+                    instance="9",
+                    fields=[FormFieldModel("repeat_value", "repeat_form", "Value", "text", "B")],
+                ),
+            ],
+        )
+
+        options = repeat_context_options(model, bundle, "tr")
+        event_option = next(option for option in options if option["kind"] == "event")
+        form_option = next(option for option in options if option["kind"] == "form")
+
+        self.assertEqual(event_option["next_instance"], "2")
+        self.assertEqual(form_option["next_instance"], "10")
+
+    def test_empty_local_repeat_draft_is_reused_instead_of_skipping_an_instance(self) -> None:
+        section = FormSectionModel(
+            form_name="multiparametrik_mr",
+            title="Multiparametrik MR",
+            event_id="baseline_arm_1",
+            repeat_instrument="multiparametrik_mr",
+            instance="1",
+            fields=[FormFieldModel("mr_tarih", "multiparametrik_mr", "Tarih", "text", "", present=False)],
+        )
+        model = FormRenderModel(
+            project_id="17",
+            record="1",
+            title="Record 1",
+            sections=[section],
+        )
+        option = {
+            "kind": "form",
+            "form_name": "multiparametrik_mr",
+            "event_id": "baseline_arm_1",
+        }
+        drafts = {"multiparametrik_mr": [("baseline_arm_1", "multiparametrik_mr", "1")]}
+
         self.assertEqual(
-            event_option["select_context"],
-            ("mr_trus_fzyon_biyopsi", "mr_trus_fzyon_biyopsi_arm_1", "mr_trus_fzyon_biyopsi", "2"),
+            reusable_repeat_section_index(
+                model,
+                drafts,
+                option,
+                section_has_values=lambda _section: False,
+            ),
+            0,
+        )
+        self.assertIsNone(
+            reusable_repeat_section_index(
+                model,
+                drafts,
+                option,
+                section_has_values=lambda _section: True,
+            )
         )
 
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from dataclasses import dataclass
 from typing import Any
@@ -20,6 +21,7 @@ API_KEY_PROVIDER_NAMES = {"openai", "openai_compatible", "openrouter"}
 GATEWAY_PROVIDER_NAMES = {"llm_gateway", "managed_gateway"}
 DEFAULT_API_KEY_SECRET_NAME = "llm_api_key"
 DEFAULT_GATEWAY_CLIENT_TOKEN_SECRET_NAME = "llm_gateway_client_token"
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -27,6 +29,11 @@ class LLMResponse:
     content: str | None
     thinking: str | None = None
     raw: Any = None
+    request_id: str | None = None
+    model: str | None = None
+    provider: str | None = None
+    finish_reason: str | None = None
+    native_finish_reason: str | None = None
 
 
 class ProviderHTTPError(RuntimeError):
@@ -34,6 +41,29 @@ class ProviderHTTPError(RuntimeError):
         super().__init__(message)
         self.status_code = status_code
         self.body = body
+
+
+class ProviderResponseError(RuntimeError):
+    """A safe, content-free error reported inside a provider response."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        request_id: str | None = None,
+        model: str | None = None,
+        provider: str | None = None,
+        finish_reason: str | None = None,
+        native_finish_reason: str | None = None,
+        error_code: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.request_id = request_id
+        self.model = model
+        self.provider = provider
+        self.finish_reason = finish_reason
+        self.native_finish_reason = native_finish_reason
+        self.error_code = error_code
 
 
 class LLMProvider:
@@ -123,6 +153,7 @@ class OpenAICompatibleProvider(LLMProvider):
                 "type": "json_schema",
                 "json_schema": {
                     "name": "extraction_response",
+                    "strict": True,
                     "schema": schema,
                 },
             }
@@ -147,11 +178,62 @@ class OpenAICompatibleProvider(LLMProvider):
             else:
                 raise
 
-        message = ((response.get("choices") or [{}])[0]).get("message") or {}
+        response_metadata = extract_openai_response_metadata(response)
+        raw_choices = response.get("choices")
+        raw_choice = raw_choices[0] if isinstance(raw_choices, list) and raw_choices else {}
+        choice = raw_choice if isinstance(raw_choice, dict) else {}
+        response_metadata["finish_reason"] = optional_metadata_text(choice.get("finish_reason"))
+        response_metadata["native_finish_reason"] = optional_metadata_text(choice.get("native_finish_reason"))
+        top_level_error = response.get("error")
+        if top_level_error is not None:
+            raise_openai_response_error(
+                "LLM provider returned an error response.",
+                response_metadata,
+                error_code=extract_provider_error_code(top_level_error),
+                outcome="top_level_error",
+            )
+
+        choice_error = choice.get("error")
+        if choice_error is not None:
+            raise_openai_response_error(
+                "LLM provider returned a completion error.",
+                response_metadata,
+                error_code=extract_provider_error_code(choice_error),
+                outcome="choice_error",
+            )
+
+        raw_message = choice.get("message")
+        message = raw_message if isinstance(raw_message, dict) else {}
+        if message.get("refusal"):
+            raise_openai_response_error(
+                "LLM provider refused the request.",
+                response_metadata,
+                outcome="refusal",
+            )
+
+        normalized_finish_reason = str(response_metadata.get("finish_reason") or "").strip().lower()
+        if normalized_finish_reason in {"error", "content_filter"}:
+            error_message = (
+                "LLM provider blocked the response through its content filter."
+                if normalized_finish_reason == "content_filter"
+                else "LLM provider could not complete the response."
+            )
+            raise_openai_response_error(
+                error_message,
+                response_metadata,
+                outcome=normalized_finish_reason,
+            )
+
+        log_openai_response_metadata(
+            response_metadata,
+            outcome="truncated" if normalized_finish_reason == "length" else "completed",
+            warning=normalized_finish_reason == "length",
+        )
         return LLMResponse(
             content=extract_openai_content(message.get("content")),
             thinking=extract_openai_content(message.get("reasoning") or message.get("thinking")),
             raw=response,
+            **response_metadata,
         )
 
 
@@ -291,6 +373,82 @@ def extract_openai_content(content: Any) -> str | None:
                     parts.append(str(text))
         return "".join(parts) or None
     return str(content)
+
+
+def optional_metadata_text(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def extract_openai_response_metadata(response: dict[str, Any]) -> dict[str, str | None]:
+    return {
+        "request_id": optional_metadata_text(response.get("id")),
+        "model": optional_metadata_text(response.get("model")),
+        "provider": optional_metadata_text(response.get("provider")),
+        "finish_reason": None,
+        "native_finish_reason": None,
+    }
+
+
+def extract_provider_error_code(provider_error: Any) -> str | None:
+    if not isinstance(provider_error, dict):
+        return None
+    return optional_metadata_text(provider_error.get("code"))
+
+
+def safe_log_metadata_value(value: Any, *, limit: int = 200) -> str:
+    if value is None:
+        return "-"
+    text = "".join(character if character.isprintable() else " " for character in str(value))
+    text = " ".join(text.split())
+    return text[:limit] or "-"
+
+
+def log_openai_response_metadata(
+    metadata: dict[str, str | None],
+    *,
+    outcome: str,
+    warning: bool = False,
+    error_code: str | None = None,
+) -> None:
+    log = logger.warning if warning else logger.info
+    log(
+        "LLM response metadata: outcome=%s request_id=%s model=%s provider=%s "
+        "finish_reason=%s native_finish_reason=%s error_code=%s",
+        safe_log_metadata_value(outcome),
+        safe_log_metadata_value(metadata.get("request_id")),
+        safe_log_metadata_value(metadata.get("model")),
+        safe_log_metadata_value(metadata.get("provider")),
+        safe_log_metadata_value(metadata.get("finish_reason")),
+        safe_log_metadata_value(metadata.get("native_finish_reason")),
+        safe_log_metadata_value(error_code),
+    )
+
+
+def raise_openai_response_error(
+    message: str,
+    metadata: dict[str, str | None],
+    *,
+    outcome: str,
+    error_code: str | None = None,
+) -> None:
+    log_openai_response_metadata(
+        metadata,
+        outcome=outcome,
+        warning=True,
+        error_code=error_code,
+    )
+    raise ProviderResponseError(
+        message,
+        request_id=metadata.get("request_id"),
+        model=metadata.get("model"),
+        provider=metadata.get("provider"),
+        finish_reason=metadata.get("finish_reason"),
+        native_finish_reason=metadata.get("native_finish_reason"),
+        error_code=error_code,
+    )
 
 
 def should_retry_without_json_schema(exc: ProviderHTTPError) -> bool:

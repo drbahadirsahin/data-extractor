@@ -99,6 +99,7 @@ def run_pyinstaller(name: str, staged_config: Path, dist_dir: Path, version: str
         f"{staged_config}{separator}.",
         f"{ROOT / 'project_config_blank.json'}{separator}.",
         f"{ROOT / 'prostate_dictionary.csv'}{separator}.",
+        f"{ROOT / 'gui' / 'assets'}{separator}gui/assets",
     ]
     command = [
         sys.executable,
@@ -130,6 +131,7 @@ def run_macos_pyinstaller(name: str, staged_config: Path, dist_dir: Path, versio
         (str(staged_config), "."),
         (str(ROOT / "project_config_blank.json"), "."),
         (str(ROOT / "prostate_dictionary.csv"), "."),
+        (str(ROOT / "gui" / "assets"), "gui/assets"),
     ]
     info_plist = {
         "CFBundleDisplayName": "LLM Extractor",

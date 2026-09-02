@@ -1,8 +1,109 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 
 from gui.i18n import tr
+
+
+@dataclass(frozen=True)
+class OverrideNumberControl:
+    """A styled integer input with explicit, platform-independent step buttons."""
+
+    widget: Any
+    spin_box: Any
+    up_button: Any
+    down_button: Any
+
+    def set_enabled(self, enabled: bool) -> None:
+        self.widget.setEnabled(bool(enabled))
+
+    def value(self) -> int:
+        return int(self.spin_box.value())
+
+
+def build_override_number_control(
+    *,
+    minimum: int,
+    maximum: int,
+    value: int,
+    accessible_name: str,
+) -> OverrideNumberControl:
+    """Build a readable number field without relying on native spin-box arrows."""
+
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import (
+        QAbstractSpinBox,
+        QFrame,
+        QHBoxLayout,
+        QSizePolicy,
+        QSpinBox,
+        QToolButton,
+        QVBoxLayout,
+    )
+
+    from gui.clinical_styles import CLINICAL_OVERRIDE_NUMBER_STYLE
+
+    container = QFrame()
+    container.setObjectName("OverrideNumberInput")
+    container.setMinimumWidth(172)
+    container.setMinimumHeight(40)
+    container.setMaximumHeight(40)
+    container.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+    container.setStyleSheet(CLINICAL_OVERRIDE_NUMBER_STYLE)
+
+    row = QHBoxLayout(container)
+    row.setContentsMargins(1, 1, 1, 1)
+    row.setSpacing(0)
+
+    spin_box = QSpinBox(container)
+    spin_box.setObjectName("OverrideNumberSpinBox")
+    spin_box.setAccessibleName(accessible_name)
+    spin_box.setRange(int(minimum), int(maximum))
+    spin_box.setValue(int(value))
+    spin_box.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
+    spin_box.setFrame(False)
+    spin_box.setKeyboardTracking(False)
+    spin_box.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+    spin_box.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+    if spin_box.lineEdit() is not None:
+        spin_box.lineEdit().setObjectName("OverrideNumberLineEdit")
+    row.addWidget(spin_box, 1)
+
+    button_column = QFrame(container)
+    button_column.setObjectName("OverrideNumberStepButtons")
+    button_column.setFixedWidth(30)
+    button_layout = QVBoxLayout(button_column)
+    button_layout.setContentsMargins(0, 0, 0, 0)
+    button_layout.setSpacing(0)
+
+    up_button = QToolButton(button_column)
+    up_button.setObjectName("OverrideNumberStepUp")
+    up_button.setText("▲")
+    up_button.setAccessibleName(f"{accessible_name}: +")
+    up_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+    up_button.setCursor(Qt.CursorShape.PointingHandCursor)
+    up_button.setAutoRepeat(True)
+    up_button.clicked.connect(spin_box.stepUp)
+    button_layout.addWidget(up_button, 1)
+
+    down_button = QToolButton(button_column)
+    down_button.setObjectName("OverrideNumberStepDown")
+    down_button.setText("▼")
+    down_button.setAccessibleName(f"{accessible_name}: −")
+    down_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+    down_button.setCursor(Qt.CursorShape.PointingHandCursor)
+    down_button.setAutoRepeat(True)
+    down_button.clicked.connect(spin_box.stepDown)
+    button_layout.addWidget(down_button, 1)
+
+    row.addWidget(button_column)
+    return OverrideNumberControl(
+        widget=container,
+        spin_box=spin_box,
+        up_button=up_button,
+        down_button=down_button,
+    )
 
 
 def edit_override_payload(
@@ -21,12 +122,12 @@ def edit_override_payload(
         QFormLayout,
         QLabel,
         QPlainTextEdit,
-        QSpinBox,
         QVBoxLayout,
     )
 
     current_payload = dict(payload or {})
     dialog = QDialog(parent)
+    dialog.setObjectName("OverrideEditorDialog")
     dialog.setWindowTitle(title)
     dialog.setMinimumWidth(560)
     layout = QVBoxLayout(dialog)
@@ -57,33 +158,41 @@ def edit_override_payload(
     set_combo_value(selection_rule_input, str(current_payload.get("selection_rule", "") or ""))
 
     max_candidates_enabled = QCheckBox(tr("override_enable_max_candidates", language))
-    max_candidates_input = QSpinBox()
-    max_candidates_input.setRange(1, 50)
+    max_candidates_enabled.setObjectName("OverrideMaxCandidatesEnabled")
     max_candidates_value = current_payload.get("max_candidates")
     max_candidates_enabled.setChecked(max_candidates_value is not None)
-    max_candidates_input.setValue(int(max_candidates_value or 3))
-    max_candidates_input.setEnabled(max_candidates_enabled.isChecked())
+    max_candidates_control = build_override_number_control(
+        minimum=1,
+        maximum=50,
+        value=int(max_candidates_value or 3),
+        accessible_name=tr("override_max_candidates", language),
+    )
+    max_candidates_control.set_enabled(max_candidates_enabled.isChecked())
 
     post_processing = current_payload.get("post_processing") or []
     limit_length_value = extract_limit_output_length(post_processing)
     limit_length_enabled = QCheckBox(tr("override_limit_output_length", language))
+    limit_length_enabled.setObjectName("OverrideLimitLengthEnabled")
     limit_length_enabled.setChecked(limit_length_value is not None)
-    limit_length_input = QSpinBox()
-    limit_length_input.setRange(1, 5000)
-    limit_length_input.setValue(int(limit_length_value or 100))
-    limit_length_input.setEnabled(limit_length_enabled.isChecked())
+    limit_length_control = build_override_number_control(
+        minimum=1,
+        maximum=5000,
+        value=int(limit_length_value or 100),
+        accessible_name=tr("override_limit_length_value", language),
+    )
+    limit_length_control.set_enabled(limit_length_enabled.isChecked())
 
     form.addRow(tr("override_prompt_append", language), prompt_append_input)
     form.addRow(tr("override_cardinality", language), cardinality_input)
     form.addRow(tr("override_selection_rule", language), selection_rule_input)
     form.addRow("", max_candidates_enabled)
-    form.addRow(tr("override_max_candidates", language), max_candidates_input)
+    form.addRow(tr("override_max_candidates", language), max_candidates_control.widget)
     form.addRow("", limit_length_enabled)
-    form.addRow(tr("override_limit_length_value", language), limit_length_input)
+    form.addRow(tr("override_limit_length_value", language), limit_length_control.widget)
     layout.addLayout(form)
 
-    max_candidates_enabled.toggled.connect(max_candidates_input.setEnabled)
-    limit_length_enabled.toggled.connect(limit_length_input.setEnabled)
+    max_candidates_enabled.toggled.connect(max_candidates_control.set_enabled)
+    limit_length_enabled.toggled.connect(limit_length_control.set_enabled)
 
     button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
     ok_button = button_box.button(QDialogButtonBox.StandardButton.Ok)
@@ -115,11 +224,11 @@ def edit_override_payload(
             result["selection_rule"] = selection_rule
 
         if max_candidates_enabled.isChecked():
-            result["max_candidates"] = int(max_candidates_input.value())
+            result["max_candidates"] = max_candidates_control.value()
 
         post_processing_items = merge_post_processing(
             existing=post_processing,
-            limit_output_length=int(limit_length_input.value()) if limit_length_enabled.isChecked() else None,
+            limit_output_length=limit_length_control.value() if limit_length_enabled.isChecked() else None,
         )
         if post_processing_items:
             result["post_processing"] = post_processing_items

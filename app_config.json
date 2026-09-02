@@ -1,6 +1,6 @@
 {
   "release": {
-    "version": "0.1.1-early.25",
+    "version": "0.2.0-early.1",
     "profile": "user",
     "channel": "early",
     "updates": {
@@ -27,7 +27,7 @@
   "llm": {
     "provider": "llm_gateway",
     "base_url": "https://llm-extractor-gateway.drbahadirsahin.workers.dev/v1",
-    "model": "qwen/qwen3.5-9b",
+    "model": "deepseek/deepseek-v4-flash",
     "temperature": 0,
     "max_tokens": 8192,
     "timeout_seconds": 600,

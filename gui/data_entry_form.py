@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import re
-from typing import Any, Callable
+from pathlib import Path
+from typing import Any, Callable, Mapping
 
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import QFrame, QLabel, QVBoxLayout
+from PySide6.QtCore import QEvent, QObject, QTimer, Qt, Signal
+from PySide6.QtWidgets import QFrame, QLabel, QLineEdit, QVBoxLayout
 
 from data_entry_form_model import (
     CHECKBOX_EDITOR,
@@ -26,6 +27,10 @@ from redcap_numeric import (
     is_redcap_numeric_validation,
     normalize_redcap_numeric_text,
 )
+
+
+def data_entry_asset_path(filename: str) -> str:
+    return str(Path(__file__).with_name("assets") / filename)
 
 
 class DataEntryNavButton(QFrame):
@@ -76,6 +81,103 @@ class DataEntryNavButton(QFrame):
         super().keyPressEvent(event)
 
 
+class DataEntryDateLineEdit(QLineEdit):
+    """Date input that requests its calendar from direct user navigation."""
+
+    calendarRequested = Signal()
+
+    def __init__(self, text: str = "", *, parent: Any | None = None) -> None:
+        super().__init__(text, parent)
+        self._calendar_request_pending = False
+
+    def mousePressEvent(self, event: Any) -> None:
+        super().mousePressEvent(event)
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._queue_calendar_request()
+
+    def focusInEvent(self, event: Any) -> None:
+        super().focusInEvent(event)
+        if event.reason() in {
+            Qt.FocusReason.TabFocusReason,
+            Qt.FocusReason.BacktabFocusReason,
+            Qt.FocusReason.ShortcutFocusReason,
+            Qt.FocusReason.OtherFocusReason,
+        }:
+            self._queue_calendar_request()
+
+    def _queue_calendar_request(self) -> None:
+        if self.isReadOnly() or not self.isEnabled() or self._calendar_request_pending:
+            return
+        self._calendar_request_pending = True
+        QTimer.singleShot(0, self._emit_calendar_request)
+
+    def _emit_calendar_request(self) -> None:
+        self._calendar_request_pending = False
+        if not self.isReadOnly() and self.isEnabled():
+            self.calendarRequested.emit()
+
+
+class DataEntryCalendarYearControls(QObject):
+    """Stable year step buttons for platforms whose native spin arrows disappear."""
+
+    def __init__(self, spin_box: Any) -> None:
+        from PySide6.QtWidgets import QAbstractSpinBox, QToolButton
+
+        super().__init__(spin_box)
+        self.spin_box = spin_box
+        spin_box.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
+        spin_box.setMinimumWidth(96)
+
+        self.up_button = QToolButton(spin_box)
+        self.up_button.setObjectName("DataEntryCalendarYearUp")
+        self.up_button.setText("▲")
+        self.up_button.setAccessibleName("Increase year")
+        self.up_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.up_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.up_button.setAutoRepeat(True)
+        self.up_button.clicked.connect(spin_box.stepUp)
+
+        self.down_button = QToolButton(spin_box)
+        self.down_button.setObjectName("DataEntryCalendarYearDown")
+        self.down_button.setText("▼")
+        self.down_button.setAccessibleName("Decrease year")
+        self.down_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.down_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.down_button.setAutoRepeat(True)
+        self.down_button.clicked.connect(spin_box.stepDown)
+
+        spin_box.installEventFilter(self)
+        self.position_buttons()
+        self.up_button.show()
+        self.down_button.show()
+
+    def eventFilter(self, watched: Any, event: Any) -> bool:
+        if watched is self.spin_box and event.type() in {
+            QEvent.Type.Resize,
+            QEvent.Type.Show,
+            QEvent.Type.Polish,
+            QEvent.Type.StyleChange,
+        }:
+            QTimer.singleShot(0, self.position_buttons)
+        return super().eventFilter(watched, event)
+
+    def position_buttons(self) -> None:
+        button_width = 23
+        inset = 1
+        available_height = max(24, self.spin_box.height() - (inset * 2))
+        upper_height = available_height // 2
+        x = max(inset, self.spin_box.width() - button_width - inset)
+        self.up_button.setGeometry(x, inset, button_width, upper_height)
+        self.down_button.setGeometry(
+            x,
+            inset + upper_height,
+            button_width,
+            available_height - upper_height,
+        )
+        self.up_button.raise_()
+        self.down_button.raise_()
+
+
 class DataEntryFormWidget:
     def __init__(self, model: FormRenderModel | None = None, *, language: str = "tr") -> None:
         from PySide6.QtWidgets import QVBoxLayout, QWidget
@@ -90,17 +192,76 @@ class DataEntryFormWidget:
         self.field_rows: dict[str, Any] = {}
         self.field_models: dict[str, FormFieldModel] = {}
         self.field_state_labels: dict[str, Any] = {}
+        self.field_progress_labels: dict[str, Any] = {}
         self.form_nav: Any | None = None
         self.form_stack: Any | None = None
+        self.event_nav: Any | None = None
+        self.record_home_stack: Any | None = None
+        self.record_matrix: Any | None = None
+        self.record_home_context_label: Any | None = None
         self.nav_buttons: dict[int, Any] = {}
         self.repeat_actions: list[dict[str, Any]] = []
         self.repeat_action_handler: Callable[[dict[str, Any]], None] | None = None
+        self.section_change_handler: Callable[[Any | None], None] | None = None
+        self.field_change_handler: Callable[[str], None] | None = None
+        self.event_order: list[str] = []
+        self.form_order: list[str] = []
         self._current_section_index = 0
         self._rendered_sections: set[int] = set()
         self._updating_calculations = False
         self.model: FormRenderModel | None = None
         if model is not None:
             self.set_model(model)
+        else:
+            self.show_empty_state()
+
+    def show_empty_state(self) -> None:
+        from PySide6.QtCore import Qt
+        from PySide6.QtWidgets import QFrame, QLabel, QVBoxLayout
+
+        empty = QFrame()
+        empty.setObjectName("DataEntryFormEmpty")
+        empty_layout = QVBoxLayout(empty)
+        empty_layout.setContentsMargins(24, 24, 24, 24)
+        empty_layout.setSpacing(7)
+        title = QLabel(tr("data_entry_form_empty_title", self.language))
+        title.setObjectName("DataEntryFormEmptyTitle")
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        body = QLabel(tr("data_entry_form_empty_body", self.language))
+        body.setObjectName("MutedLabel")
+        body.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        body.setWordWrap(True)
+        empty_layout.addStretch(1)
+        empty_layout.addWidget(title)
+        empty_layout.addWidget(body)
+        empty_layout.addStretch(1)
+        self.layout.addWidget(empty, 1)
+
+    def clear_model(self) -> None:
+        """Remove the rendered record and restore the initial empty state."""
+        clear_layout(self.layout)
+        self.editor_widgets = {}
+        self.field_rows = {}
+        self.field_models = {}
+        self.field_state_labels = {}
+        self.field_progress_labels = {}
+        self.form_nav = None
+        self.form_stack = None
+        self.event_nav = None
+        self.record_home_stack = None
+        self.record_matrix = None
+        self.record_home_context_label = None
+        self.nav_buttons = {}
+        self.repeat_actions = []
+        self.repeat_action_handler = None
+        self.event_order = []
+        self.form_order = []
+        self._current_section_index = -1
+        self._rendered_sections = set()
+        self._updating_calculations = False
+        self.model = None
+        self.show_empty_state()
+        self.notify_section_changed()
 
     def set_model(
         self,
@@ -108,6 +269,8 @@ class DataEntryFormWidget:
         *,
         repeat_actions: list[dict[str, Any]] | None = None,
         repeat_action_handler: Callable[[dict[str, Any]], None] | None = None,
+        event_order: list[str] | None = None,
+        form_order: list[str] | None = None,
     ) -> None:
         from PySide6.QtCore import Qt
         from PySide6.QtWidgets import (
@@ -126,11 +289,18 @@ class DataEntryFormWidget:
         self.field_rows = {}
         self.field_models = {}
         self.field_state_labels = {}
+        self.field_progress_labels = {}
         self.form_nav = None
         self.form_stack = None
+        self.event_nav = None
+        self.record_home_stack = None
+        self.record_matrix = None
+        self.record_home_context_label = None
         self.nav_buttons = {}
         self.repeat_actions = list(repeat_actions or [])
         self.repeat_action_handler = repeat_action_handler
+        self.event_order = [str(item) for item in (event_order or [])]
+        self.form_order = [str(item) for item in (form_order or [])]
         self._current_section_index = 0
         self._rendered_sections = set()
         self._updating_calculations = False
@@ -146,7 +316,13 @@ class DataEntryFormWidget:
         header.setWordWrap(True)
         header_layout.addWidget(header)
         self.layout.addWidget(header_frame)
-        if len(model.sections) > 1 or self.repeat_actions:
+        use_event_navigation = bool(self.repeat_actions) or any(
+            str(getattr(section, "event_id", "") or "")
+            for section in model.sections
+        )
+        if use_event_navigation:
+            self.build_event_form_shell(model)
+        elif len(model.sections) > 1:
             shell = QFrame()
             shell.setObjectName("DataEntryFormShell")
             shell_layout = QHBoxLayout(shell)
@@ -156,8 +332,8 @@ class DataEntryFormWidget:
             form_nav = QScrollArea()
             form_nav.setObjectName("DataEntryFormNavScroll")
             form_nav.setWidgetResizable(True)
-            form_nav.setMinimumWidth(300)
-            form_nav.setMaximumWidth(380)
+            form_nav.setMinimumWidth(205)
+            form_nav.setMaximumWidth(270)
             form_nav.setFrameShape(QFrame.Shape.NoFrame)
             form_nav.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
@@ -178,23 +354,16 @@ class DataEntryFormWidget:
                 event_instance = "" if getattr(section, "repeat_instrument", "") else getattr(section, "instance", "")
                 event_key = (getattr(section, "event_id", ""), event_instance)
                 if has_event_groups and event_key not in event_items:
-                    event_action = self.repeat_action_for_event_header(
-                        getattr(section, "event_id", ""),
-                        event_instance,
-                    )
                     nav_layout.addWidget(
                         self.build_event_header(
                             section.event_label or tr("data_entry_event_unspecified", self.language),
-                            event_action,
                         )
                     )
                     event_items.add(event_key)
-                inline_action = self.repeat_action_for_section(section)
-                nav_wrap_width = 20 if inline_action is not None else 30
                 button = DataEntryNavButton(
                     wrap_nav_title(
                         nav_title_for_section(section, include_event=not has_event_groups),
-                        width=nav_wrap_width,
+                        width=30,
                     )
                 )
                 button.setObjectName("DataEntryFormNavButton")
@@ -205,10 +374,7 @@ class DataEntryFormWidget:
                 button.setMinimumWidth(0)
                 button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
                 button.clicked.connect(lambda _checked=False, index=section_index: self.select_section(index))
-                if inline_action is None:
-                    nav_layout.addWidget(button)
-                else:
-                    nav_layout.addWidget(self.build_nav_button_row(button, inline_action))
+                nav_layout.addWidget(button)
                 self.nav_buttons[section_index] = button
                 placeholder = QWidget()
                 placeholder.setObjectName("DataEntrySectionPlaceholder")
@@ -227,12 +393,191 @@ class DataEntryFormWidget:
         else:
             for section in model.sections:
                 self.layout.addWidget(self.build_section_scroll(section), 1)
+            self._current_section_index = 0 if model.sections else -1
+            self.notify_section_changed()
         self.update_branching_visibility()
         self.update_calculated_fields()
 
-    def build_event_header(self, label_text: str, action: dict[str, Any] | None = None) -> Any:
-        from PySide6.QtCore import QSize
-        from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QToolButton
+    def build_event_form_shell(self, model: FormRenderModel) -> None:
+        """Show REDCap events as a persistent accordion beside the active form."""
+
+        from PySide6.QtWidgets import (
+            QFrame,
+            QHBoxLayout,
+            QSizePolicy,
+            QStackedWidget,
+            QVBoxLayout,
+            QWidget,
+        )
+
+        from gui.data_entry_event_nav import DataEntryEventNav
+
+        shell = QFrame()
+        shell.setObjectName("DataEntryFormShell")
+        shell_layout = QHBoxLayout(shell)
+        shell_layout.setContentsMargins(0, 0, 0, 0)
+        shell_layout.setSpacing(10)
+
+        nav_panel = QFrame()
+        nav_panel.setObjectName("DataEntryEventNavPanel")
+        nav_panel.setMinimumWidth(220)
+        nav_panel.setMaximumWidth(300)
+        nav_panel.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
+        nav_panel_layout = QVBoxLayout(nav_panel)
+        nav_panel_layout.setContentsMargins(8, 8, 8, 8)
+        nav_panel_layout.setSpacing(0)
+
+        event_nav = DataEntryEventNav(language=self.language)
+        event_nav.targetActivated.connect(self.select_section)
+        event_nav.repeatActionRequested.connect(self.trigger_repeat_action)
+        event_nav.set_record_model(
+            model,
+            repeat_actions=self.repeat_actions,
+            event_order=self.event_order,
+            form_order=self.form_order,
+        )
+        nav_panel_layout.addWidget(event_nav, 1)
+
+        form_stack = QStackedWidget()
+        form_stack.setObjectName("DataEntryFormStack")
+        for _section in model.sections:
+            placeholder = QWidget()
+            placeholder.setObjectName("DataEntrySectionPlaceholder")
+            placeholder_layout = QVBoxLayout(placeholder)
+            placeholder_layout.setContentsMargins(0, 0, 0, 0)
+            placeholder_layout.setSpacing(0)
+            form_stack.addWidget(placeholder)
+
+        shell_layout.addWidget(nav_panel, 0)
+        shell_layout.addWidget(form_stack, 1)
+        self.layout.addWidget(shell, 1)
+
+        self.event_nav = event_nav
+        self.form_nav = event_nav.scroll
+        self.form_stack = form_stack
+        if model.sections:
+            first_index = first_section_with_values(model.sections)
+            event_nav.set_expanded_keys(())
+            self.select_section(first_index)
+        else:
+            self._current_section_index = -1
+            self.notify_section_changed()
+
+    def build_record_home(self, model: FormRenderModel) -> None:
+        from PySide6.QtWidgets import (
+            QFrame,
+            QHBoxLayout,
+            QLabel,
+            QPushButton,
+            QStackedWidget,
+            QVBoxLayout,
+            QWidget,
+        )
+
+        from gui.data_entry_record_matrix import DataEntryRecordMatrix, matrix_text
+
+        root_stack = QStackedWidget()
+        root_stack.setObjectName("DataEntryRecordHomeStack")
+
+        overview = QWidget()
+        overview.setObjectName("DataEntryRecordHomePage")
+        overview_layout = QVBoxLayout(overview)
+        overview_layout.setContentsMargins(0, 0, 0, 0)
+        overview_layout.setSpacing(10)
+
+        intro = QFrame()
+        intro.setObjectName("DataEntryRecordHomeIntro")
+        intro_layout = QVBoxLayout(intro)
+        intro_layout.setContentsMargins(14, 11, 14, 11)
+        intro_layout.setSpacing(3)
+        intro_title = QLabel(tr("data_entry_record_home_title", self.language))
+        intro_title.setObjectName("DataEntryRecordHomeTitle")
+        intro_body = QLabel(tr("data_entry_record_home_body", self.language))
+        intro_body.setObjectName("DataEntryRecordHomeBody")
+        intro_body.setWordWrap(True)
+        intro_layout.addWidget(intro_title)
+        intro_layout.addWidget(intro_body)
+        legend = QHBoxLayout()
+        legend.setContentsMargins(0, 4, 0, 0)
+        legend.setSpacing(12)
+        for status in ("empty", "incomplete", "unverified", "filled"):
+            item = QLabel(f"● {matrix_text(status, self.language)}")
+            item.setObjectName("DataEntryRecordHomeLegend")
+            item.setProperty("matrix_status", status)
+            legend.addWidget(item)
+        legend.addStretch(1)
+        intro_layout.addLayout(legend)
+        overview_layout.addWidget(intro)
+
+        matrix = DataEntryRecordMatrix(language=self.language)
+        matrix.targetActivated.connect(self.select_section)
+        matrix.repeatActionRequested.connect(self.trigger_repeat_action)
+        matrix.set_record_model(
+            model,
+            repeat_actions=self.repeat_actions,
+            event_order=self.event_order,
+            form_order=self.form_order,
+        )
+        overview_layout.addWidget(matrix, 1)
+        root_stack.addWidget(overview)
+
+        editor_page = QWidget()
+        editor_page.setObjectName("DataEntryRecordEditorPage")
+        editor_layout = QVBoxLayout(editor_page)
+        editor_layout.setContentsMargins(0, 0, 0, 0)
+        editor_layout.setSpacing(8)
+        editor_toolbar = QFrame()
+        editor_toolbar.setObjectName("DataEntryRecordEditorToolbar")
+        editor_toolbar_layout = QHBoxLayout(editor_toolbar)
+        editor_toolbar_layout.setContentsMargins(10, 8, 10, 8)
+        editor_toolbar_layout.setSpacing(9)
+        back_button = QPushButton(tr("data_entry_record_home_back", self.language))
+        back_button.setObjectName("DataEntryRecordHomeBack")
+        back_button.setProperty("secondary", True)
+        back_button.setProperty("compact", True)
+        back_button.clicked.connect(self.show_record_overview)
+        editor_toolbar_layout.addWidget(back_button)
+        context_label = QLabel("")
+        context_label.setObjectName("DataEntryRecordEditorContext")
+        context_label.setWordWrap(True)
+        editor_toolbar_layout.addWidget(context_label, 1)
+        editor_layout.addWidget(editor_toolbar)
+
+        form_stack = QStackedWidget()
+        form_stack.setObjectName("DataEntryFormStack")
+        for _section in model.sections:
+            placeholder = QWidget()
+            placeholder.setObjectName("DataEntrySectionPlaceholder")
+            placeholder_layout = QVBoxLayout(placeholder)
+            placeholder_layout.setContentsMargins(0, 0, 0, 0)
+            placeholder_layout.setSpacing(0)
+            form_stack.addWidget(placeholder)
+        editor_layout.addWidget(form_stack, 1)
+        root_stack.addWidget(editor_page)
+
+        self.form_stack = form_stack
+        self.record_home_stack = root_stack
+        self.record_matrix = matrix
+        self.record_home_context_label = context_label
+        self._current_section_index = -1
+        self.layout.addWidget(root_stack, 1)
+        self.show_record_overview()
+
+    def show_record_overview(self) -> None:
+        if self.record_home_stack is None:
+            return
+        self.record_home_stack.setCurrentIndex(0)
+        self._current_section_index = -1
+        if self.record_matrix is not None:
+            self.record_matrix.set_selected_section(-1)
+        self.notify_section_changed()
+
+    def notify_section_changed(self) -> None:
+        if self.section_change_handler is not None:
+            self.section_change_handler(self.current_section())
+
+    def build_event_header(self, label_text: str) -> Any:
+        from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel
 
         row = QFrame()
         row.setObjectName("DataEntryFormNavEventRow")
@@ -245,104 +590,13 @@ class DataEntryFormWidget:
         event_label.setWordWrap(True)
         event_label.setMinimumWidth(0)
         layout.addWidget(event_label, 1)
-        if action is not None:
-            add_button = QToolButton()
-            add_button.setText("+")
-            add_button.setObjectName("DataEntryFormNavEventAdd")
-            add_button.setToolTip(str(action.get("label") or tr("data_entry_add_repeat", self.language)))
-            add_button.setFixedSize(QSize(28, 28))
-            add_button.clicked.connect(lambda _checked=False, option=action: self.trigger_repeat_action(option))
-            layout.addWidget(add_button, 0)
         return row
 
-    def build_nav_button_row(self, button: Any, action: dict[str, Any]) -> Any:
-        from PySide6.QtCore import QSize
-        from PySide6.QtWidgets import QFrame, QHBoxLayout, QToolButton
-
-        row = QFrame()
-        row.setObjectName("DataEntryFormNavButtonRow")
-        row.setMinimumWidth(0)
-        layout = QHBoxLayout(row)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(6)
-        layout.addWidget(button, 1)
-        add_button = QToolButton()
-        add_button.setText("+")
-        add_button.setObjectName("DataEntryFormNavInlineAdd")
-        add_button.setToolTip(str(action.get("label") or tr("data_entry_add_repeat", self.language)))
-        add_button.setFixedSize(QSize(28, 28))
-        add_button.clicked.connect(lambda _checked=False, option=action: self.trigger_repeat_action(option))
-        layout.addWidget(add_button, 0)
-        return row
-
-    def repeat_action_for_section(self, section: Any) -> dict[str, Any] | None:
-        if section_filled_count(section) == 0:
-            return None
-        for action in self.repeat_actions:
-            if str(action.get("kind") or "") != "form":
+    def section_currently_has_values(self, section: Any) -> bool:
+        for field in getattr(section, "fields", []) or []:
+            if field.editor == DESCRIPTION_EDITOR:
                 continue
-            if str(action.get("form_name") or "") != str(getattr(section, "form_name", "") or ""):
-                continue
-            if str(action.get("event_id") or "") != str(getattr(section, "event_id", "") or ""):
-                continue
-            if not self.section_is_latest_repeat_form_instance(section):
-                continue
-            return action
-        return None
-
-    def repeat_action_for_event_header(self, event_id: str, event_instance: str) -> dict[str, Any] | None:
-        if not self.event_instance_has_values(event_id, event_instance):
-            return None
-        for action in self.repeat_actions:
-            if str(action.get("kind") or "") != "event":
-                continue
-            if str(action.get("event_id") or "") != str(event_id or ""):
-                continue
-            latest_instance = self.latest_event_instance(event_id)
-            if latest_instance <= 0 and not str(event_instance or ""):
-                return action
-            if latest_instance > 0 and numeric_instance_value(event_instance) == latest_instance:
-                return action
-        return None
-
-    def section_is_latest_repeat_form_instance(self, section: Any) -> bool:
-        form_name = str(getattr(section, "form_name", "") or "")
-        event_id = str(getattr(section, "event_id", "") or "")
-        repeat_instrument = str(getattr(section, "repeat_instrument", "") or "")
-        instance = numeric_instance_value(getattr(section, "instance", ""))
-        if not form_name or repeat_instrument != form_name or instance <= 0:
-            return False
-        latest = 0
-        for candidate in getattr(self.model, "sections", []) if self.model is not None else []:
-            if str(getattr(candidate, "form_name", "") or "") != form_name:
-                continue
-            if str(getattr(candidate, "event_id", "") or "") != event_id:
-                continue
-            if str(getattr(candidate, "repeat_instrument", "") or "") != form_name:
-                continue
-            latest = max(latest, numeric_instance_value(getattr(candidate, "instance", "")))
-        return instance == latest
-
-    def latest_event_instance(self, event_id: str) -> int:
-        latest = 0
-        for section in getattr(self.model, "sections", []) if self.model is not None else []:
-            if str(getattr(section, "event_id", "") or "") != str(event_id or ""):
-                continue
-            if str(getattr(section, "repeat_instrument", "") or ""):
-                continue
-            latest = max(latest, numeric_instance_value(getattr(section, "instance", "")))
-        return latest
-
-    def event_instance_has_values(self, event_id: str, event_instance: str) -> bool:
-        instance_key = str(event_instance or "")
-        for section in getattr(self.model, "sections", []) if self.model is not None else []:
-            if str(getattr(section, "event_id", "") or "") != str(event_id or ""):
-                continue
-            if str(getattr(section, "repeat_instrument", "") or ""):
-                continue
-            if str(getattr(section, "instance", "") or "") != instance_key:
-                continue
-            if section_filled_count(section) > 0:
+            if field_value_is_filled(self.current_field_value(field)):
                 return True
         return False
 
@@ -355,6 +609,21 @@ class DataEntryFormWidget:
         if self.form_nav is None:
             return
         self.form_nav.verticalScrollBar().setValue(max(0, int(value or 0)))
+
+    def navigation_state(self) -> dict[str, Any]:
+        if self.event_nav is not None:
+            return self.event_nav.navigation_state()
+        return {"scroll": {"vertical": self.navigation_scroll_value(), "horizontal": 0}}
+
+    def restore_navigation_state(self, state: Mapping[str, Any]) -> None:
+        if self.event_nav is not None:
+            self.event_nav.restore_navigation_state(state)
+            return
+        scroll = state.get("scroll", {})
+        if isinstance(scroll, Mapping):
+            self.set_navigation_scroll_value(int(scroll.get("vertical", 0)))
+        elif isinstance(scroll, int):
+            self.set_navigation_scroll_value(scroll)
 
     def trigger_repeat_action(self, option: dict[str, Any]) -> None:
         if self.repeat_action_handler is not None:
@@ -389,12 +658,23 @@ class DataEntryFormWidget:
         self.render_section_at(section_index)
         self.form_stack.setCurrentIndex(section_index)
         self._current_section_index = section_index
+        if self.record_home_stack is not None:
+            self.record_home_stack.setCurrentIndex(1)
+        if self.record_matrix is not None:
+            self.record_matrix.set_selected_section(section_index)
+        if self.event_nav is not None:
+            self.event_nav.set_selected_section(section_index)
+        if self.record_home_context_label is not None:
+            section = self.model.sections[section_index]
+            self.record_home_context_label.setText(section_tooltip(section))
         for index, button in self.nav_buttons.items():
             button.setChecked(index == section_index)
             button.setProperty("active", index == section_index)
             repolish(button)
         self.update_calculated_fields()
         self.update_branching_visibility()
+        self.refresh_current_navigation_status(dirty=False)
+        self.notify_section_changed()
 
     def render_section_at(self, section_index: int) -> None:
         if self.model is None or self.form_stack is None:
@@ -413,25 +693,64 @@ class DataEntryFormWidget:
         self._rendered_sections.add(section_index)
 
     def build_section_widget(self, section: Any, *, show_title: bool = True) -> Any:
-        from PySide6.QtWidgets import QFrame, QLabel, QLayout, QSizePolicy, QVBoxLayout
+        from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QLayout, QSizePolicy, QVBoxLayout
 
         frame = QFrame()
         frame.setObjectName("DataEntryFormSection")
         frame.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
         layout = QVBoxLayout(frame)
-        layout.setContentsMargins(18, 18, 18, 18)
+        layout.setContentsMargins(18, 16, 18, 20)
         layout.setSpacing(12)
         layout.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
         if show_title:
-            if getattr(section, "event_label", ""):
-                event_title = QLabel(section.event_label)
+            heading = QFrame()
+            heading.setObjectName("DataEntryFormHeading")
+            heading_layout = QHBoxLayout(heading)
+            heading_layout.setContentsMargins(0, 0, 0, 10)
+            heading_layout.setSpacing(12)
+            heading_text = QVBoxLayout()
+            heading_text.setContentsMargins(0, 0, 0, 0)
+            heading_text.setSpacing(4)
+            event_label = str(getattr(section, "event_label", "") or "").strip()
+            form_title = section_display_title(section)
+            if event_label and not section_headings_equivalent(event_label, form_title):
+                event_title = QLabel(event_label)
                 event_title.setObjectName("SectionEventTitle")
                 event_title.setWordWrap(True)
-                layout.addWidget(event_title)
-            title = QLabel(section_display_title(section))
+                heading_text.addWidget(event_title)
+            title = QLabel(form_title)
             title.setObjectName("SectionTitle")
             title.setWordWrap(True)
-            layout.addWidget(title)
+            heading_text.addWidget(title)
+            heading_layout.addLayout(heading_text, 1)
+
+            visible_fields = [
+                field for field in section.fields if field.editor != DESCRIPTION_EDITOR
+            ]
+            required_fields = [field for field in visible_fields if field.required]
+            filled_required = sum(
+                1 for field in required_fields if field_value_is_filled(field.value)
+            )
+            progress = QLabel(
+                tr(
+                    "data_entry_required_progress",
+                    self.language,
+                    filled=filled_required,
+                    total=len(required_fields),
+                )
+                if required_fields
+                else tr("data_entry_required_progress_none", self.language)
+            )
+            progress.setObjectName("DataEntryFormProgress")
+            progress.setProperty("section_context", str(getattr(section, "context_key", "") or ""))
+            progress.setProperty(
+                "complete",
+                bool(required_fields) and filled_required == len(required_fields),
+            )
+            heading_layout.addWidget(progress, 0, Qt.AlignmentFlag.AlignTop)
+            section_key = str(getattr(section, "context_key", "") or section.form_name)
+            self.field_progress_labels[section_key] = progress
+            layout.addWidget(heading)
         if any(field.section_header for field in section.fields):
             current_header: str | None = None
             current_fields: list[FormFieldModel] = []
@@ -493,8 +812,8 @@ class DataEntryFormWidget:
         group.setObjectName("DataEntryFormSubsectionBlock")
         group.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
         layout = QVBoxLayout(group)
-        layout.setContentsMargins(16, 14, 16, 16)
-        layout.setSpacing(11)
+        layout.setContentsMargins(14, 12, 14, 13)
+        layout.setSpacing(10)
         layout.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
 
         header = QLabel(str(title or "").strip())
@@ -511,9 +830,14 @@ class DataEntryFormWidget:
 
         row = QFrame()
         row.setObjectName("DataEntryFieldRow")
+        row.setProperty("editor_kind", field.editor)
+        row.setProperty("required", bool(field.required))
+        row.setProperty("conditional", bool(field.branching_logic))
+        row.setProperty("calculated", field.field_type == "calc")
+        row.setProperty("read_only", bool(field.read_only))
         row.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
         layout = QVBoxLayout(row)
-        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setContentsMargins(8, 5, 8, 6)
         layout.setSpacing(5)
         layout.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
 
@@ -543,8 +867,9 @@ class DataEntryFormWidget:
         editor = self.build_editor(field)
         layout.addWidget(editor)
         if field.branching_logic:
-            branching = QLabel(field.branching_logic)
+            branching = QLabel(tr("data_entry_conditional_field", self.language))
             branching.setObjectName("DataEntryBranchingLogic")
+            branching.setToolTip(field.branching_logic)
             branching.setWordWrap(True)
             layout.addWidget(branching)
         field_key = field_widget_key(field)
@@ -587,16 +912,20 @@ class DataEntryFormWidget:
         return editor
 
     def build_date_edit(self, field: FormFieldModel) -> Any:
-        from PySide6.QtCore import QDate, QEvent, QObject, QTimer
+        from PySide6.QtCore import QDate, QLocale, QSize
+        from PySide6.QtGui import QIcon
         from PySide6.QtWidgets import (
             QCalendarWidget,
             QFrame,
             QHBoxLayout,
-            QLineEdit,
             QMenu,
+            QSpinBox,
             QSizePolicy,
+            QToolButton,
             QWidgetAction,
         )
+
+        from gui.clinical_styles import CLINICAL_CALENDAR_MENU_STYLE, CLINICAL_CALENDAR_STYLE
 
         field_key = field_widget_key(field)
         frame = QFrame()
@@ -608,18 +937,52 @@ class DataEntryFormWidget:
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(6)
 
-        line_edit = QLineEdit(normalize_redcap_date_text(field.value_text))
+        line_edit = DataEntryDateLineEdit(normalize_redcap_date_text(field.value_text))
         line_edit.setObjectName("DataEntryDateLineEdit")
         line_edit.setPlaceholderText("YYYY-MM-DD")
         line_edit.setReadOnly(field.read_only)
         line_edit.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
 
+        button = QToolButton()
+        button.setObjectName("DataEntryDateButton")
+        button.setIcon(QIcon(data_entry_asset_path("calendar.svg")))
+        button.setIconSize(QSize(18, 18))
+        button.setToolTip(tr("data_entry_date_picker_tooltip", self.language))
+        button.setAccessibleName(tr("data_entry_date_picker_tooltip", self.language))
+        button.setEnabled(not field.read_only)
+        button.setCursor(Qt.CursorShape.PointingHandCursor)
+
+        clear_button = QToolButton()
+        clear_button.setObjectName("DataEntryDateClearButton")
+        clear_button.setIcon(QIcon(data_entry_asset_path("date_clear.svg")))
+        clear_button.setIconSize(QSize(18, 18))
+        clear_button.setToolTip(tr("data_entry_date_clear_tooltip", self.language))
+        clear_button.setAccessibleName(tr("data_entry_date_clear_tooltip", self.language))
+        clear_button.setEnabled(not field.read_only)
+        clear_button.setCursor(Qt.CursorShape.PointingHandCursor)
+
         menu = QMenu(line_edit)
+        menu.setObjectName("DataEntryDateMenu")
+        menu.setStyleSheet(CLINICAL_CALENDAR_MENU_STYLE)
         calendar = QCalendarWidget()
+        calendar.setObjectName("DataEntryCalendar")
+        calendar.setStyleSheet(CLINICAL_CALENDAR_STYLE)
+        calendar.setLocale(
+            QLocale(QLocale.Language.Turkish, QLocale.Country.Turkey)
+            if self.language == "tr"
+            else QLocale(QLocale.Language.English, QLocale.Country.UnitedStates)
+        )
+        calendar.setNavigationBarVisible(True)
         calendar.setGridVisible(True)
+        calendar.setFirstDayOfWeek(Qt.DayOfWeek.Monday)
+        calendar.setHorizontalHeaderFormat(QCalendarWidget.HorizontalHeaderFormat.ShortDayNames)
+        calendar.setVerticalHeaderFormat(QCalendarWidget.VerticalHeaderFormat.NoVerticalHeader)
+        calendar.setMinimumSize(336, 286)
         parsed = parse_redcap_date_text(line_edit.text())
         if parsed.isValid():
             calendar.setSelectedDate(parsed)
+        year_spin_box = calendar.findChild(QSpinBox, "qt_calendar_yearedit")
+        year_controls = DataEntryCalendarYearControls(year_spin_box) if year_spin_box is not None else None
         action = QWidgetAction(menu)
         action.setDefaultWidget(calendar)
         menu.addAction(action)
@@ -627,6 +990,24 @@ class DataEntryFormWidget:
         def choose_date(date: QDate) -> None:
             line_edit.setText(date.toString("yyyy-MM-dd"))
             menu.close()
+
+        def normalize_typed_date() -> None:
+            normalized = normalize_redcap_date_text(line_edit.text())
+            parsed_date = parse_redcap_date_text(normalized)
+            if not parsed_date.isValid():
+                return
+            line_edit.setText(parsed_date.toString("yyyy-MM-dd"))
+            calendar.setSelectedDate(parsed_date)
+
+        def update_clear_button(text: str = "") -> None:
+            clear_button.setVisible(not field.read_only and bool(str(text or "").strip()))
+
+        def clear_date() -> None:
+            if field.read_only:
+                return
+            line_edit.clear()
+            calendar.setSelectedDate(QDate.currentDate())
+            line_edit.setFocus(Qt.FocusReason.MouseFocusReason)
 
         def show_calendar() -> None:
             if line_edit.isReadOnly() or menu.isVisible():
@@ -636,22 +1017,24 @@ class DataEntryFormWidget:
                 calendar.setSelectedDate(current_date)
             menu.popup(line_edit.mapToGlobal(line_edit.rect().bottomLeft()))
 
-        class DatePopupFilter(QObject):
-            def eventFilter(self, watched: Any, event: Any) -> bool:
-                if event.type() == QEvent.Type.MouseButtonPress:
-                    QTimer.singleShot(0, show_calendar)
-                return False
-
         calendar.clicked.connect(choose_date)
         calendar.activated.connect(choose_date)
         line_edit.textChanged.connect(lambda _text=None, key=field_key: self.handle_field_changed(key))
-        popup_filter = DatePopupFilter(line_edit)
-        line_edit.installEventFilter(popup_filter)
+        line_edit.textChanged.connect(update_clear_button)
+        line_edit.editingFinished.connect(normalize_typed_date)
+        line_edit.calendarRequested.connect(show_calendar)
+        button.clicked.connect(lambda _checked=False: show_calendar())
+        clear_button.clicked.connect(lambda _checked=False: clear_date())
         frame._data_entry_date_line_edit = line_edit
         frame._data_entry_date_calendar = calendar
         frame._data_entry_date_menu = menu
-        frame._data_entry_date_popup_filter = popup_filter
+        frame._data_entry_date_button = button
+        frame._data_entry_date_clear_button = clear_button
+        frame._data_entry_date_year_controls = year_controls
         layout.addWidget(line_edit, 1)
+        layout.addWidget(clear_button, 0)
+        layout.addWidget(button, 0)
+        update_clear_button(line_edit.text())
         self.editor_widgets[field_key] = frame
         return frame
 
@@ -756,16 +1139,45 @@ class DataEntryFormWidget:
         return frame
 
     def build_readonly(self, field: FormFieldModel) -> Any:
-        from PySide6.QtWidgets import QLabel
+        from PySide6.QtCore import QSize
+        from PySide6.QtGui import QIcon
+        from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout
 
         field_key = field_widget_key(field)
         value = field.value_text or "-"
+        if field.field_type == "calc":
+            container = QFrame()
+            container.setObjectName("DataEntryCalculatedValue")
+            container.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+            container_layout = QHBoxLayout(container)
+            container_layout.setContentsMargins(12, 9, 12, 9)
+            container_layout.setSpacing(10)
+            icon = QLabel("")
+            icon.setObjectName("DataEntryCalculatedIcon")
+            icon.setPixmap(QIcon(data_entry_asset_path("calculator_lock.svg")).pixmap(QSize(20, 20)))
+            container_layout.addWidget(icon, 0, Qt.AlignmentFlag.AlignTop)
+            text_layout = QVBoxLayout()
+            text_layout.setContentsMargins(0, 0, 0, 0)
+            text_layout.setSpacing(2)
+            label = QLabel(value)
+            label.setObjectName("DataEntryReadonlyValue")
+            label.setProperty("calculated", True)
+            hint = QLabel(tr("data_entry_calculated_hint", self.language))
+            hint.setObjectName("DataEntryCalculatedHint")
+            text_layout.addWidget(label)
+            text_layout.addWidget(hint)
+            container_layout.addLayout(text_layout, 1)
+            label.setProperty("field_name", field.field_name)
+            label.setProperty("field_key", field_key)
+            label.setWordWrap(True)
+            container._data_entry_value_label = label
+            self.editor_widgets[field_key] = label
+            return container
+
         label = QLabel(value)
         label.setObjectName("DataEntryReadonlyValue")
         label.setProperty("field_name", field.field_name)
         label.setProperty("field_key", field_key)
-        if field.field_type == "calc":
-            label.setProperty("calculated", True)
         label.setWordWrap(True)
         self.editor_widgets[field_key] = label
         return label
@@ -809,6 +1221,11 @@ class DataEntryFormWidget:
     def current_section(self) -> Any | None:
         if self.model is None or not self.model.sections:
             return None
+        if self.record_home_stack is not None:
+            index = self.current_section_index()
+            if index < 0 or index >= len(self.model.sections):
+                return None
+            return self.model.sections[index]
         if self.form_nav is None:
             return self.model.sections[0]
         index = self.current_section_index()
@@ -817,6 +1234,8 @@ class DataEntryFormWidget:
         return self.model.sections[index]
 
     def current_section_index(self) -> int:
+        if self.record_home_stack is not None:
+            return self._current_section_index
         if self.form_nav is None:
             return 0
         return self._current_section_index
@@ -891,6 +1310,9 @@ class DataEntryFormWidget:
         self.update_field_row_state(field_key)
         self.update_calculated_fields()
         self.update_branching_visibility()
+        self.refresh_current_navigation_status(dirty=True)
+        if self.field_change_handler is not None:
+            self.field_change_handler(field_key)
 
     def normalize_numeric_editor(self, field_key: str) -> None:
         field = self.field_models.get(field_key)
@@ -948,6 +1370,61 @@ class DataEntryFormWidget:
     def refresh_field_states(self) -> None:
         for field_name in list(self.field_rows):
             self.update_field_row_state(field_name)
+        self.refresh_section_progress()
+
+    def refresh_section_progress(self) -> None:
+        if self.model is None:
+            return
+        for section in self.model.sections:
+            section_key = str(getattr(section, "context_key", "") or section.form_name)
+            progress = self.field_progress_labels.get(section_key)
+            if progress is None:
+                continue
+            required_fields = [
+                field
+                for field in section.fields
+                if field.required and field.editor != DESCRIPTION_EDITOR
+            ]
+            filled_required = sum(
+                1
+                for field in required_fields
+                if field_value_is_filled(self.current_field_value(field))
+            )
+            progress.setText(
+                tr(
+                    "data_entry_required_progress",
+                    self.language,
+                    filled=filled_required,
+                    total=len(required_fields),
+                )
+                if required_fields
+                else tr("data_entry_required_progress_none", self.language)
+            )
+            progress.setProperty(
+                "complete",
+                bool(required_fields) and filled_required == len(required_fields),
+            )
+            repolish(progress)
+
+    def refresh_current_navigation_status(self, *, dirty: bool = False) -> None:
+        if self.event_nav is None:
+            return
+        section_index = self.current_section_index()
+        section = self.current_section()
+        if section is None or section_index < 0:
+            return
+        fields = [
+            field
+            for field in (getattr(section, "fields", []) or [])
+            if field.editor != DESCRIPTION_EDITOR
+        ]
+        missing_required = any(
+            bool(field.required) and not field_value_is_filled(self.current_field_value(field))
+            for field in fields
+        )
+        has_value = any(field_value_is_filled(self.current_field_value(field)) for field in fields)
+        status = "partial" if missing_required else "filled" if has_value else "empty"
+        self.event_nav.set_section_status(section_index, status, dirty=dirty)
 
     def update_field_row_state(self, field_key: str) -> None:
         field = self.field_models.get(field_key)
@@ -959,6 +1436,7 @@ class DataEntryFormWidget:
         row.setProperty("field_state", state)
         state_label.setProperty("state", state)
         state_label.setText(field_state_label(state, self.language))
+        state_label.setVisible(state in {"required_missing", "info"})
         repolish(row)
         repolish(state_label)
 
@@ -1020,6 +1498,8 @@ def clear_layout(layout: Any) -> None:
         widget = item.widget()
         child_layout = item.layout()
         if widget is not None:
+            widget.hide()
+            widget.setParent(None)
             widget.deleteLater()
         elif child_layout is not None:
             clear_layout(child_layout)
@@ -1171,6 +1651,14 @@ def section_display_title(section: Any) -> str:
     return title
 
 
+def section_headings_equivalent(event_label: str, form_title: str) -> bool:
+    def normalized(value: str) -> str:
+        without_instance = re.sub(r"\s*#\s*\d+\s*$", "", str(value or "")).strip()
+        return re.sub(r"\s+", " ", without_instance).casefold()
+
+    return bool(normalized(event_label)) and normalized(event_label) == normalized(form_title)
+
+
 def first_section_with_values(sections: list[Any]) -> int:
     for index, section in enumerate(sections):
         if section_filled_count(section) > 0:
@@ -1190,13 +1678,6 @@ def section_filled_count(section: Any) -> int:
         if str(field.value or "") != "":
             count += 1
     return count
-
-
-def numeric_instance_value(value: Any) -> int:
-    try:
-        return int(str(value or "0"))
-    except ValueError:
-        return 0
 
 
 def normalize_text_editor_value(field: FormFieldModel, value: Any) -> str:

@@ -77,9 +77,19 @@ class DataEntryAIFillBridge(QObject):
         values: dict[str, Any] = {}
         for result in list(payload.get("results") or []):
             for field_result in result.merged_response.results:
-                if field_result.final_value is None or field_result.status == "not_found":
+                # Some OpenAI-compatible providers omit ``status`` (which then
+                # defaults to ``not_found``) even though they return a usable
+                # final value.  The value is the authoritative signal for the
+                # form-fill bridge; dropping it here makes a successful model
+                # response look like an empty result.
+                value = (
+                    field_result.final_value
+                    if field_result.final_value is not None
+                    else getattr(field_result, "final_value_code", None)
+                )
+                if value is None:
                     continue
-                values[field_result.field_name] = field_result.final_value
+                values[field_result.field_name] = value
         self.page.handle_ai_fill_success(values, self.field_names)
 
     @Slot()
@@ -116,20 +126,29 @@ class ClinicalDataEntryPage:
         self._ai_thread: QThread | None = None
         self._ai_worker: PatientQueueExtractionWorker | None = None
         self._ai_bridge: DataEntryAIFillBridge | None = None
+        self._compact_workspace = False
 
-        self.widget = QWidget()
+        class ResponsiveDataEntryPage(QWidget):
+            resized = Signal(int)
+
+            def resizeEvent(inner_self, event: Any) -> None:
+                super().resizeEvent(event)
+                inner_self.resized.emit(event.size().width())
+
+        self.widget = ResponsiveDataEntryPage()
         layout = QVBoxLayout(self.widget)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(14)
+        layout.setSpacing(10)
 
         header = QFrame()
         header.setObjectName("PageHeader")
         header_layout = QHBoxLayout(header)
-        header_layout.setContentsMargins(18, 16, 18, 16)
-        header_layout.setSpacing(14)
+        header_layout.setContentsMargins(4, 3, 4, 5)
+        header_layout.setSpacing(8)
         title_group = QVBoxLayout()
         title = QLabel(tr("data_entry_title", self.language))
         title.setObjectName("PageTitle")
+        title.setVisible(False)
         title_group.addWidget(title)
         subtitle = QLabel(tr("data_entry_subtitle", self.language))
         subtitle.setObjectName("MutedLabel")
@@ -172,12 +191,18 @@ class ClinicalDataEntryPage:
         self.new_record_button = QPushButton(tr("data_entry_new_record", self.language))
         self.new_record_button.setProperty("secondary", True)
         self.new_record_button.clicked.connect(lambda: self.open_new_record())
+        self.record_list_toggle = QPushButton(tr("data_entry_records_toggle", self.language))
+        self.record_list_toggle.setProperty("secondary", True)
+        self.record_list_toggle.setCheckable(True)
+        self.record_list_toggle.setVisible(False)
+        self.record_list_toggle.clicked.connect(lambda _checked=False: self.toggle_record_list())
         self.search_input = QLineEdit("")
         self.search_input.setPlaceholderText(tr("data_entry_search_placeholder", self.language))
         self.search_input.returnPressed.connect(self.refresh_records)
         toolbar.addWidget(self.sync_button)
         toolbar.addWidget(self.refresh_button)
         toolbar.addWidget(self.new_record_button)
+        toolbar.addWidget(self.record_list_toggle)
         toolbar.addWidget(self.search_input, 1)
         layout.addWidget(toolbar_shell)
 
@@ -246,19 +271,79 @@ class ClinicalDataEntryPage:
         action_row.addWidget(self.save_button)
         action_row.addWidget(self.send_button)
         right_layout.addLayout(action_row)
+        self.form_widget.section_change_handler = self.handle_form_section_changed
+        self.form_widget.field_change_handler = self.handle_form_field_changed
         splitter.addWidget(right_panel)
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
+        splitter.setChildrenCollapsible(True)
+        splitter.setSizes([220, 900])
+        self.workspace_splitter = splitter
         workspace_layout.addWidget(splitter, 1)
         layout.addWidget(workspace_shell, 1)
 
+        self.widget.resized.connect(self.apply_responsive_workspace)
         self.refresh_project_state()
+        QTimer.singleShot(0, lambda: self.apply_responsive_workspace(self.widget.width()))
+
+    def apply_responsive_workspace(self, width: int) -> None:
+        compact = int(width) < 1000
+        self._compact_workspace = compact
+        self.record_list_toggle.setVisible(compact)
+        if not compact:
+            self.set_record_list_visible(True)
+            return
+        self.set_record_list_visible(self.current_model is None or self.record_list.currentItem() is None)
+
+    def toggle_record_list(self) -> None:
+        if not self._compact_workspace:
+            return
+        self.set_record_list_visible(not self.record_list.isVisible())
+
+    def set_record_list_visible(self, visible: bool) -> None:
+        visible = bool(visible)
+        self.record_list.setVisible(visible)
+        self.record_list_toggle.setChecked(visible)
+        total = max(1, self.workspace_splitter.width())
+        self.workspace_splitter.setSizes([220, max(1, total - 220)] if visible else [0, total])
 
     def set_form_actions_enabled(self, enabled: bool) -> None:
         enabled = bool(enabled)
         self.ai_fill_button.setEnabled(enabled and self._ai_thread is None)
         self.save_button.setEnabled(enabled)
         self.send_button.setEnabled(enabled)
+
+    def has_active_form_context(self, section: Any | None = None) -> bool:
+        project = current_redcap_project_token(self.runtime.settings)
+        model = self.current_model
+        if project is None or model is None or self.form_widget.model is not model:
+            return False
+        if str(model.project_id) != str(project.project_id):
+            return False
+        active_section = section if section is not None else self.form_widget.current_section()
+        if active_section is None:
+            return False
+        selected_item = self.record_list.currentItem()
+        if selected_item is not None:
+            selected_record = str(selected_item.data(Qt.ItemDataRole.UserRole) or "")
+            if selected_record and selected_record != str(model.record):
+                return False
+        return True
+
+    def recompute_form_actions(self, section: Any | None = None) -> None:
+        self.set_form_actions_enabled(self.has_active_form_context(section))
+
+    def handle_form_section_changed(self, section: Any | None) -> None:
+        self.recompute_form_actions(section)
+
+    def handle_form_field_changed(self, _field_key: str) -> None:
+        self.handle_form_section_changed(self.form_widget.current_section())
+
+    def clear_current_record(self) -> None:
+        self.current_model = None
+        self.extra_repeat_contexts = {}
+        self.form_widget.clear_model()
+        self.set_form_actions_enabled(False)
 
     def set_activity(self, title: str, detail: str, *, tone: str = "neutral") -> None:
         self.activity_title.setText(title)
@@ -337,14 +422,29 @@ class ClinicalDataEntryPage:
         )
         return None
 
-    def refresh_records(self, *, update_activity: bool = True) -> None:
+    def refresh_records(
+        self,
+        *,
+        update_activity: bool = True,
+        restore_record: str | None = None,
+        restore_section_context: tuple[str, str, str, str] | None = None,
+    ) -> None:
         project = current_redcap_project_token(self.runtime.settings)
-        self.record_list.clear()
-        self.current_model = None
-        self.extra_repeat_contexts = {}
-        self.set_form_actions_enabled(False)
         if project is None:
+            self.record_list.clear()
+            self.clear_current_record()
             return
+
+        # The rendered form is the user's visible context. Prefer it when
+        # recovering a previously inconsistent page/model state.
+        displayed_model = self.form_widget.model or self.current_model
+        if (
+            restore_record is None
+            and displayed_model is not None
+            and str(displayed_model.project_id) == str(project.project_id)
+        ):
+            restore_record = str(displayed_model.record)
+            restore_section_context = data_entry_section_context(self.form_widget.current_section())
         try:
             records = self.browser.list_records(
                 project.project_id,
@@ -362,6 +462,12 @@ class ClinicalDataEntryPage:
                     tone="error",
                 )
             return
+
+        signals_were_blocked = self.record_list.blockSignals(True)
+        self.record_list.clear()
+        self.current_model = None
+        self.extra_repeat_contexts = {}
+        self.set_form_actions_enabled(False)
         for record in records:
             item_text = record.record
             if record.label and record.label != record.record:
@@ -375,6 +481,26 @@ class ClinicalDataEntryPage:
                 item_text = f"{item_text} ({', '.join(flags)})"
             self.record_list.addItem(item_text)
             self.record_list.item(self.record_list.count() - 1).setData(Qt.ItemDataRole.UserRole, record.record)
+
+        selection_restored = bool(
+            restore_record is not None and select_record_in_list(self.record_list, restore_record)
+        )
+        self.record_list.blockSignals(signals_were_blocked)
+        if selection_restored:
+            self.open_selected_record()
+            if self.current_model is not None:
+                select_form_section_by_context(
+                    self.form_widget,
+                    self.current_model,
+                    restore_section_context,
+                )
+                self.handle_form_section_changed(self.form_widget.current_section())
+            else:
+                selection_restored = False
+        if not selection_restored:
+            self.clear_current_record()
+        if self._compact_workspace:
+            self.set_record_list_visible(not selection_restored)
         if update_activity:
             self.set_activity(
                 tr("data_entry_activity_records_title", self.language),
@@ -394,6 +520,7 @@ class ClinicalDataEntryPage:
         if self.bundle is None:
             self.bundle = self.load_active_bundle()
         if self.bundle is None:
+            self.clear_current_record()
             self.set_activity(
                 tr("data_entry_activity_attention_title", self.language),
                 tr("data_entry_metadata_missing", self.language),
@@ -418,6 +545,7 @@ class ClinicalDataEntryPage:
                 title=tr("data_entry_record_title", self.language, record=record),
             )
         except Exception as exc:
+            self.clear_current_record()
             self.set_activity(
                 tr("data_entry_activity_error_title", self.language),
                 tr("data_entry_record_open_failed", self.language, error=str(exc)),
@@ -429,8 +557,12 @@ class ClinicalDataEntryPage:
             model,
             repeat_actions=repeat_context_options(model, self.bundle, self.language),
             repeat_action_handler=self.add_repeat_context,
+            event_order=list(self.bundle.config.event_labels),
+            form_order=list(self.bundle.grouped_fields),
         )
-        self.set_form_actions_enabled(True)
+        self.handle_form_section_changed(self.form_widget.current_section())
+        if self._compact_workspace:
+            self.set_record_list_visible(False)
         self.set_activity(
             tr("data_entry_activity_records_title", self.language),
             tr("data_entry_record_opened", self.language, record=record),
@@ -504,9 +636,13 @@ class ClinicalDataEntryPage:
             self.current_model,
             repeat_actions=repeat_context_options(self.current_model, self.bundle, self.language),
             repeat_action_handler=self.add_repeat_context,
+            event_order=list(self.bundle.config.event_labels),
+            form_order=list(self.bundle.grouped_fields),
         )
         self.record_list.clearSelection()
-        self.set_form_actions_enabled(True)
+        self.handle_form_section_changed(self.form_widget.current_section())
+        if self._compact_workspace:
+            self.set_record_list_visible(False)
         self.status_label.setText(
             tr(
                 "data_entry_new_record_ready",
@@ -579,9 +715,11 @@ class ClinicalDataEntryPage:
         record: str,
         section_context: tuple[str, str, str, str] | None,
     ) -> None:
-        self.refresh_records(update_activity=False)
-        select_record_in_list(self.record_list, record)
-        select_form_section_by_context(self.form_widget, self.current_model, section_context)
+        self.refresh_records(
+            update_activity=False,
+            restore_record=record,
+            restore_section_context=section_context,
+        )
 
     def submit_current_record_changes(self) -> int:
         if self.current_model is None:
@@ -709,10 +847,25 @@ class ClinicalDataEntryPage:
     @Slot(object, object)
     def handle_ai_fill_success(self, values: dict[str, Any], field_names: set[str]) -> None:
         if not values:
-            self.status_label.setText(tr("data_entry_ai_fill_no_values", self.language))
+            self.set_activity(
+                tr("data_entry_activity_attention_title", self.language),
+                tr("data_entry_ai_fill_no_values", self.language),
+                tone="warning",
+            )
             return
         applied = self.form_widget.apply_values(values, field_names=field_names)
-        self.status_label.setText(tr("data_entry_ai_fill_done", self.language, count=applied))
+        if applied <= 0:
+            self.set_activity(
+                tr("data_entry_activity_attention_title", self.language),
+                tr("data_entry_ai_fill_no_values", self.language),
+                tone="warning",
+            )
+            return
+        self.set_activity(
+            tr("data_entry_activity_ready_title", self.language),
+            tr("data_entry_ai_fill_done", self.language, count=applied),
+            tone="success",
+        )
 
     def add_repeat_context(self, option: dict[str, Any] | None = None) -> None:
         if self.current_model is None:
@@ -726,8 +879,25 @@ class ClinicalDataEntryPage:
                 self.status_label.setText(tr("data_entry_repeat_no_options", self.language))
                 return
             option = options[0]
+        reusable_index = reusable_repeat_section_index(
+            self.current_model,
+            self.extra_repeat_contexts,
+            option,
+            section_has_values=self.form_widget.section_currently_has_values,
+        )
+        if reusable_index is not None:
+            self.form_widget.select_section(reusable_index)
+            reusable_section = self.current_model.sections[reusable_index]
+            reusable_label = str(getattr(reusable_section, "title", "") or "")
+            reusable_instance = str(getattr(reusable_section, "instance", "") or "")
+            if reusable_instance:
+                reusable_label = f"{reusable_label} #{reusable_instance}"
+            self.status_label.setText(
+                tr("data_entry_repeat_draft_opened", self.language, label=reusable_label)
+            )
+            return
         current_values = self.form_widget.collect_values(include_hidden=True)
-        nav_scroll_value = self.form_widget.navigation_scroll_value()
+        navigation_state = self.form_widget.navigation_state()
         contexts = contexts_for_repeat_option(option, self.bundle)
         for form_name, context in contexts.items():
             bucket = self.extra_repeat_contexts.setdefault(form_name, [])
@@ -736,7 +906,7 @@ class ClinicalDataEntryPage:
         self.rebuild_current_record_model(
             preserve_values=current_values,
             select_context=option["select_context"],
-            navigation_scroll_value=nav_scroll_value,
+            navigation_state=navigation_state,
         )
         self.status_label.setText(tr("data_entry_repeat_added", self.language, label=option["label"]))
 
@@ -745,7 +915,7 @@ class ClinicalDataEntryPage:
         *,
         preserve_values: dict[str, Any] | None = None,
         select_context: tuple[str, str, str, str] | None = None,
-        navigation_scroll_value: int | None = None,
+        navigation_state: dict[str, Any] | None = None,
     ) -> None:
         project = current_redcap_project_token(self.runtime.settings)
         if project is None or self.current_model is None or self.bundle is None:
@@ -769,22 +939,21 @@ class ClinicalDataEntryPage:
             self.current_model,
             repeat_actions=repeat_context_options(self.current_model, self.bundle, self.language),
             repeat_action_handler=self.add_repeat_context,
+            event_order=list(self.bundle.config.event_labels),
+            form_order=list(self.bundle.grouped_fields),
         )
         if preserve_values:
             render_sections_for_preserved_values(self.form_widget, self.current_model, preserve_values)
             self.form_widget.apply_values(preserve_values, field_names=set(preserve_values))
+        if navigation_state is not None:
+            self.form_widget.restore_navigation_state(navigation_state)
         if select_context is not None:
             for index, section in enumerate(self.current_model.sections):
                 context = (section.form_name, section.event_id, section.repeat_instrument, section.instance)
                 if context == select_context:
                     self.form_widget.select_section(index)
                     break
-        if navigation_scroll_value is not None:
-            QTimer.singleShot(
-                0,
-                lambda value=int(navigation_scroll_value): self.form_widget.set_navigation_scroll_value(value),
-            )
-        self.set_form_actions_enabled(True)
+        self.handle_form_section_changed(self.form_widget.current_section())
 
     def dynamic_options_for_field(self, field_spec: Any, record: str) -> list[dict[str, str]]:
         sql = metadata_optional_text(field_spec, "choices")
@@ -812,14 +981,25 @@ class ClinicalDataEntryPage:
 
     @Slot(str)
     def handle_ai_fill_failure(self, error: str) -> None:
-        self.status_label.setText(tr("data_entry_ai_fill_failed", self.language, error=error))
+        # Model-validation errors may include excerpts from the source document
+        # or raw model response.  Keep those details visible to the local user,
+        # but never persist them in the application log.
+        logging.error(
+            "Data-entry AI fill failed; details omitted for privacy (characters=%s)",
+            len(str(error or "")),
+        )
+        self.set_activity(
+            tr("data_entry_activity_error_title", self.language),
+            tr("data_entry_ai_fill_failed", self.language, error=error),
+            tone="error",
+        )
 
     @Slot()
     def cleanup_ai_thread(self) -> None:
         self._ai_thread = None
         self._ai_worker = None
         self._ai_bridge = None
-        self.set_form_actions_enabled(self.current_model is not None)
+        self.handle_form_section_changed(self.form_widget.current_section())
 
     def start_sync(self, *, auto: bool = False) -> bool:
         project = current_redcap_project_token(self.runtime.settings)
@@ -1014,12 +1194,13 @@ def data_entry_label_fields(app_config: dict[str, Any]) -> list[str]:
     return ["hasta_ad", "hasta_soyad", "patient_identifier", "record_id"]
 
 
-def select_record_in_list(record_list: Any, record: str) -> None:
+def select_record_in_list(record_list: Any, record: str) -> bool:
     for index in range(record_list.count()):
         item = record_list.item(index)
         if str(item.data(Qt.ItemDataRole.UserRole)) == str(record):
             record_list.setCurrentRow(index)
-            return
+            return True
+    return False
 
 
 def data_entry_section_context(section: Any | None) -> tuple[str, str, str, str] | None:
@@ -1136,6 +1317,7 @@ def repeat_context_options(model: Any, bundle: WorkspaceBundle, language: str) -
             form_name
             for form_name in grouped_fields
             if event_key in {str(item) for item in form_event_map.get(form_name, [])}
+            and not form_repeats_in_event(bundle, form_name, event_key)
         ]
         if not event_forms:
             continue
@@ -1144,7 +1326,7 @@ def repeat_context_options(model: Any, bundle: WorkspaceBundle, language: str) -
         contexts = {
             form_name: (
                 event_key,
-                form_name if form_repeats_in_event(bundle, form_name, event_key) else "",
+                "",
                 instance,
             )
             for form_name in event_forms
@@ -1155,6 +1337,12 @@ def repeat_context_options(model: Any, bundle: WorkspaceBundle, language: str) -
             {
                 "kind": "event",
                 "event_id": event_key,
+                "event_label": event_label,
+                "next_instance": instance,
+                "form_labels": {
+                    form_name: form_labels.get(form_name) or form_name
+                    for form_name in event_forms
+                },
                 "label": tr("data_entry_repeat_event_option", language, event=event_label, instance=instance),
                 "contexts_by_form": contexts,
                 "select_context": (first_form, first_event_id, first_repeat_instrument, first_instance),
@@ -1175,6 +1363,9 @@ def repeat_context_options(model: Any, bundle: WorkspaceBundle, language: str) -
                     "kind": "form",
                     "form_name": form_name,
                     "event_id": event_key,
+                    "form_label": form_label,
+                    "event_label": event_label,
+                    "next_instance": instance,
                     "label": tr(
                         "data_entry_repeat_form_option",
                         language,
@@ -1237,6 +1428,7 @@ def next_event_instance(model: Any, event_id: str) -> int:
         numeric_instance(getattr(section, "instance", ""))
         for section in getattr(model, "sections", []) or []
         if str(getattr(section, "event_id", "")) == str(event_id)
+        and not str(getattr(section, "repeat_instrument", "") or "")
     ]
     return max(instances or [0]) + 1
 
@@ -1267,6 +1459,42 @@ def contexts_for_repeat_option(option: dict[str, Any], bundle: WorkspaceBundle) 
             for form_name, context in contexts.items()
         }
     return {}
+
+
+def reusable_repeat_section_index(
+    model: Any,
+    additional_contexts_by_form: dict[str, list[tuple[str, str, str]]],
+    option: dict[str, Any],
+    *,
+    section_has_values: Callable[[Any], bool],
+) -> int | None:
+    kind = str(option.get("kind") or "")
+    event_id = str(option.get("event_id") or "")
+    form_name = str(option.get("form_name") or "")
+    candidates: list[tuple[int, int]] = []
+    for index, section in enumerate(getattr(model, "sections", []) or []):
+        section_form = str(getattr(section, "form_name", "") or "")
+        section_event = str(getattr(section, "event_id", "") or "")
+        section_repeat = str(getattr(section, "repeat_instrument", "") or "")
+        section_instance = str(getattr(section, "instance", "") or "")
+        if section_event != event_id:
+            continue
+        if kind == "form" and (section_form != form_name or section_repeat != form_name):
+            continue
+        if kind == "event" and section_repeat:
+            continue
+        if kind not in {"event", "form"}:
+            continue
+        context = (section_event, section_repeat, section_instance)
+        if context not in additional_contexts_by_form.get(section_form, []):
+            continue
+        if section_has_values(section):
+            continue
+        candidates.append((numeric_instance(section_instance), index))
+    if not candidates:
+        return None
+    latest_instance = max(instance for instance, _index in candidates)
+    return min(index for instance, index in candidates if instance == latest_instance)
 
 
 def prompt_ai_fill_options(
@@ -1580,8 +1808,34 @@ def build_data_entry_ai_config(
 ) -> Any:
     scoped_config = deepcopy(bundle.config)
     scoped_config.dictionary_path = str(bundle.config.dictionary_path)
-    scoped_config.target_forms = [form_name]
-    scoped_config.target_fields = list(field_names)
+    selected_field_names = list(
+        dict.fromkeys(
+            str(field_name).strip()
+            for field_name in field_names
+            if str(field_name).strip()
+        )
+    )
+    selected_field_name_set = set(selected_field_names)
+
+    # ``parse_form_fields`` treats target_forms as an instruction to include
+    # every field in the form.  AI fill is field-selective, so use the fieldset
+    # path exclusively and retain only selected appended metadata rows.  The
+    # latter is necessary because ``parse_fieldset`` otherwise unions every
+    # append_fields entry into target_fields.
+    scoped_config.target_forms = []
+    scoped_config.target_fields = selected_field_names
+    source_field_name_key = scoped_config.dictionary_legend.get("field_name", "field_name")
+    scoped_config.append_fields = [
+        deepcopy(field_payload)
+        for field_payload in (scoped_config.append_fields or [])
+        if isinstance(field_payload, dict)
+        and str(
+            field_payload.get(source_field_name_key)
+            or field_payload.get("field_name")
+            or ""
+        ).strip()
+        in selected_field_name_set
+    ]
     scoped_config.llm = effective_data_entry_llm_settings(runtime, bundle)
     apply_ai_fill_overrides(
         scoped_config,

@@ -9,6 +9,7 @@ from llm_provider import (
     OllamaProvider,
     OpenAICompatibleProvider,
     ProviderHTTPError,
+    ProviderResponseError,
     build_auth_headers,
     build_ollama_options,
     build_openai_reasoning,
@@ -139,7 +140,198 @@ class LlmProviderTests(unittest.TestCase):
         first_payload = mock_post.call_args_list[0].kwargs["payload"]
         second_payload = mock_post.call_args_list[1].kwargs["payload"]
         self.assertIn("response_format", first_payload)
+        self.assertTrue(first_payload["response_format"]["json_schema"]["strict"])
         self.assertNotIn("response_format", second_payload)
+
+    def test_openai_compatible_returns_safe_response_metadata(self) -> None:
+        provider = OpenAICompatibleProvider()
+        sensitive_content = '{"patient_name":"Sensitive Patient"}'
+        success_response = {
+            "id": "gen-123",
+            "model": "deepseek/deepseek-v4-flash",
+            "provider": "DeepInfra",
+            "choices": [
+                {
+                    "finish_reason": "stop",
+                    "native_finish_reason": "stop",
+                    "message": {"content": sensitive_content},
+                }
+            ],
+        }
+        with (
+            patch("llm_provider.post_json", return_value=success_response),
+            self.assertLogs("llm_provider", level="INFO") as captured,
+        ):
+            response = provider.generate(
+                messages=[{"role": "user", "content": "sensitive input"}],
+                schema={"type": "object"},
+                settings={
+                    "provider": "openai_compatible",
+                    "base_url": "https://openrouter.ai/api/v1",
+                    "api_key": "secret",
+                    "model": "deepseek/deepseek-v4-flash",
+                },
+            )
+
+        self.assertEqual(response.content, sensitive_content)
+        self.assertEqual(response.request_id, "gen-123")
+        self.assertEqual(response.model, "deepseek/deepseek-v4-flash")
+        self.assertEqual(response.provider, "DeepInfra")
+        self.assertEqual(response.finish_reason, "stop")
+        self.assertEqual(response.native_finish_reason, "stop")
+        log_output = "\n".join(captured.output)
+        self.assertIn("request_id=gen-123", log_output)
+        self.assertNotIn("Sensitive Patient", log_output)
+        self.assertNotIn("sensitive input", log_output)
+
+    def test_openai_compatible_carries_length_finish_reason(self) -> None:
+        provider = OpenAICompatibleProvider()
+        truncated_response = {
+            "id": "gen-length",
+            "model": "deepseek/deepseek-v4-flash",
+            "provider": "DeepInfra",
+            "choices": [
+                {
+                    "finish_reason": "length",
+                    "native_finish_reason": "max_tokens",
+                    "message": {"content": '{"partial":'},
+                }
+            ],
+        }
+        with (
+            patch("llm_provider.post_json", return_value=truncated_response),
+            self.assertLogs("llm_provider", level="WARNING") as captured,
+        ):
+            response = provider.generate(
+                messages=[{"role": "user", "content": "test"}],
+                schema={"type": "object"},
+                settings={
+                    "provider": "openai_compatible",
+                    "base_url": "https://openrouter.ai/api/v1",
+                    "api_key": "secret",
+                    "model": "deepseek/deepseek-v4-flash",
+                },
+            )
+
+        self.assertEqual(response.content, '{"partial":')
+        self.assertEqual(response.finish_reason, "length")
+        self.assertEqual(response.native_finish_reason, "max_tokens")
+        self.assertIn("outcome=truncated", "\n".join(captured.output))
+
+    def test_openai_compatible_rejects_top_level_error_without_leaking_message(self) -> None:
+        provider = OpenAICompatibleProvider()
+        error_response = {
+            "id": "gen-error",
+            "model": "deepseek/deepseek-v4-flash",
+            "provider": "DeepInfra",
+            "error": {
+                "code": 503,
+                "message": "Sensitive Patient data appeared in the upstream error",
+            },
+        }
+        with (
+            patch("llm_provider.post_json", return_value=error_response),
+            self.assertLogs("llm_provider", level="WARNING") as captured,
+        ):
+            with self.assertRaises(ProviderResponseError) as raised:
+                provider.generate(
+                    messages=[{"role": "user", "content": "test"}],
+                    schema={"type": "object"},
+                    settings={
+                        "provider": "openai_compatible",
+                        "base_url": "https://openrouter.ai/api/v1",
+                        "api_key": "secret",
+                        "model": "deepseek/deepseek-v4-flash",
+                    },
+                )
+
+        self.assertEqual(raised.exception.request_id, "gen-error")
+        self.assertEqual(raised.exception.error_code, "503")
+        self.assertNotIn("Sensitive Patient", str(raised.exception))
+        self.assertNotIn("Sensitive Patient", "\n".join(captured.output))
+
+    def test_openai_compatible_rejects_choice_error(self) -> None:
+        provider = OpenAICompatibleProvider()
+        error_response = {
+            "id": "gen-choice-error",
+            "model": "deepseek/deepseek-v4-flash",
+            "provider": "DeepInfra",
+            "choices": [
+                {
+                    "finish_reason": "error",
+                    "native_finish_reason": "upstream_error",
+                    "error": {"code": 429, "message": "private upstream detail"},
+                    "message": {"content": ""},
+                }
+            ],
+        }
+        with (
+            patch("llm_provider.post_json", return_value=error_response),
+            self.assertLogs("llm_provider", level="WARNING"),
+        ):
+            with self.assertRaises(ProviderResponseError) as raised:
+                provider.generate(
+                    messages=[{"role": "user", "content": "test"}],
+                    schema={"type": "object"},
+                    settings={
+                        "provider": "openai_compatible",
+                        "base_url": "https://openrouter.ai/api/v1",
+                        "api_key": "secret",
+                        "model": "deepseek/deepseek-v4-flash",
+                    },
+                )
+
+        self.assertEqual(raised.exception.finish_reason, "error")
+        self.assertEqual(raised.exception.native_finish_reason, "upstream_error")
+        self.assertEqual(raised.exception.error_code, "429")
+        self.assertNotIn("private upstream detail", str(raised.exception))
+
+    def test_openai_compatible_rejects_refusal_and_terminal_finish_reasons(self) -> None:
+        provider = OpenAICompatibleProvider()
+        responses = {
+            "refusal": {
+                "choices": [
+                    {
+                        "finish_reason": "stop",
+                        "message": {"content": None, "refusal": "sensitive refusal detail"},
+                    }
+                ]
+            },
+            "error": {
+                "choices": [
+                    {
+                        "finish_reason": "error",
+                        "message": {"content": None},
+                    }
+                ]
+            },
+            "content_filter": {
+                "choices": [
+                    {
+                        "finish_reason": "content_filter",
+                        "message": {"content": None},
+                    }
+                ]
+            },
+        }
+        for outcome, response_payload in responses.items():
+            with self.subTest(outcome=outcome):
+                with (
+                    patch("llm_provider.post_json", return_value=response_payload),
+                    self.assertLogs("llm_provider", level="WARNING"),
+                ):
+                    with self.assertRaises(ProviderResponseError) as raised:
+                        provider.generate(
+                            messages=[{"role": "user", "content": "test"}],
+                            schema={"type": "object"},
+                            settings={
+                                "provider": "openai_compatible",
+                                "base_url": "https://openrouter.ai/api/v1",
+                                "api_key": "secret",
+                                "model": "deepseek/deepseek-v4-flash",
+                            },
+                        )
+                self.assertNotIn("sensitive refusal detail", str(raised.exception))
 
     def test_gateway_provider_posts_without_openrouter_key(self) -> None:
         provider = OpenAICompatibleProvider()

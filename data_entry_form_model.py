@@ -68,6 +68,8 @@ class FormSectionModel:
     repeat_instrument: str = ""
     instance: str = ""
     context_key: str = ""
+    completion_status: str = ""
+    completion_present: bool = False
 
 
 @dataclass(frozen=True)
@@ -119,12 +121,17 @@ def build_form_render_model(
     )
     direct_values_by_context, checkbox_values_by_context = value_maps_by_context(field_values)
     sections: list[FormSectionModel] = []
-    for form_name, event_id, repeat_instrument, instance in ordered_form_contexts(field_specs_by_form, contexts_by_form):
+    for form_name, event_id, repeat_instrument, instance in ordered_form_contexts(
+        field_specs_by_form,
+        contexts_by_form,
+        event_order=event_labels,
+    ):
         field_specs = field_specs_by_form[form_name]
         context = context_key_tuple(event_id, repeat_instrument, instance)
         legacy_context = context_key_tuple(event_id, "", instance)
         direct_values = direct_values_by_context.get(context) or direct_values_by_context.get(legacy_context, {})
         checkbox_values = checkbox_values_by_context.get(context) or checkbox_values_by_context.get(legacy_context, {})
+        completion_value = direct_values.get(f"{form_name}_complete")
         fields = [
             build_field_model(
                 spec,
@@ -156,6 +163,12 @@ def build_form_render_model(
                 repeat_instrument=repeat_instrument,
                 instance=instance,
                 context_key=section_context_key(form_name, event_id, repeat_instrument, instance),
+                completion_status=(
+                    ""
+                    if completion_value is None or completion_value.value is None
+                    else str(completion_value.value)
+                ),
+                completion_present=completion_value is not None,
             )
         )
     return FormRenderModel(
@@ -344,6 +357,7 @@ def form_contexts_by_form(
     contexts: dict[str, list[tuple[str, str, str]]] = {}
     for form_name, field_specs in field_specs_by_form.items():
         field_names = {metadata_text(spec, "field_name") for spec in field_specs if metadata_text(spec, "field_name")}
+        field_names.add(f"{form_name}_complete")
         form_contexts: list[tuple[str, str, str]] = []
         mapped_events = form_event_map.get(form_name, [])
         allowed_events = set(mapped_events)
@@ -356,7 +370,7 @@ def form_contexts_by_form(
             )
             event_repeats_here = event_key in repeating_events
             if event_repeats_here:
-                for event_instance in event_repeat_contexts.get(event_key, ["1"]):
+                for event_instance in event_repeat_contexts.get(event_key, []):
                     repeat_instrument = form_name if form_repeats_here else ""
                     append_context(form_contexts, event_key, repeat_instrument, event_instance)
             elif not form_repeats_here:
@@ -394,72 +408,7 @@ def form_contexts_by_form(
             if not mapped_events:
                 form_contexts.append(("", "", ""))
         contexts[form_name] = form_contexts
-    add_empty_repeatable_form_contexts(
-        contexts,
-        form_event_map,
-        repeating_form_event_map,
-        repeating_events,
-    )
     return contexts
-
-
-def add_empty_repeatable_form_contexts(
-    contexts: dict[str, list[tuple[str, str, str]]],
-    form_event_map: dict[str, list[str]],
-    repeating_form_event_map: dict[str, set[str]],
-    repeating_events: set[str],
-) -> None:
-    forms_by_event: dict[str, list[str]] = {}
-    for form_name, events in form_event_map.items():
-        form_key = normalize_context_part(form_name)
-        if not form_key or form_key not in contexts:
-            continue
-        for event_name in events:
-            event_key = normalize_context_part(event_name)
-            if not event_key:
-                continue
-            forms_by_event.setdefault(event_key, []).append(form_key)
-
-    for event_key, event_forms in forms_by_event.items():
-        repeatable_forms = [
-            form_name
-            for form_name in event_forms
-            if form_context_allows_repeat(
-                form_name,
-                event_key,
-                repeating_form_event_map=repeating_form_event_map,
-            )
-        ]
-        if not event_forms or len(repeatable_forms) != len(event_forms):
-            continue
-        instances = repeatable_event_instances_for_empty_contexts(
-            contexts,
-            event_key,
-            event_is_repeating=event_key in repeating_events,
-        )
-        for instance in instances:
-            for form_key in repeatable_forms:
-                append_context(contexts.setdefault(form_key, []), event_key, form_key, instance)
-
-
-def repeatable_event_instances_for_empty_contexts(
-    contexts: dict[str, list[tuple[str, str, str]]],
-    event_key: str,
-    *,
-    event_is_repeating: bool,
-) -> list[str]:
-    if not event_is_repeating:
-        return ["1"]
-    instances: list[str] = []
-    for form_contexts in contexts.values():
-        for context_event, _repeat_instrument, instance in form_contexts:
-            if context_event != event_key:
-                continue
-            instance_key = normalize_context_part(instance)
-            if not instance_key or instance_key in instances:
-                continue
-            instances.append(instance_key)
-    return instances or ["1"]
 
 
 def form_context_allows_repeat(
@@ -504,6 +453,8 @@ def record_value_has_content(value: RecordFieldValue) -> bool:
 def ordered_form_contexts(
     field_specs_by_form: dict[str, list[Any]],
     contexts_by_form: dict[str, list[tuple[str, str, str]]],
+    *,
+    event_order: Iterable[str] | None = None,
 ) -> list[tuple[str, str, str, str]]:
     has_event_context = any(
         event_id or repeat_instrument or instance
@@ -520,6 +471,19 @@ def ordered_form_contexts(
     for form_name in field_specs_by_form:
         for event_id, repeat_instrument, instance in contexts_by_form.get(form_name, []):
             append_context(ordered_contexts, event_id, repeat_instrument, instance)
+    event_positions = {
+        event_key: index
+        for index, event_name in enumerate(event_order or ())
+        if (event_key := normalize_context_part(event_name))
+    }
+    if event_positions:
+        ordered_contexts.sort(
+            key=lambda context: (
+                (0, event_positions[context[0]])
+                if context[0] in event_positions
+                else (1, 0)
+            )
+        )
     ordered: list[tuple[str, str, str, str]] = []
     for event_id, repeat_instrument, instance in ordered_contexts:
         for form_name in field_specs_by_form:

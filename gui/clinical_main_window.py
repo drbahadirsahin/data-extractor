@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Callable
 
-from llm_settings import managed_llm_settings_from_config
+from llm_settings import DEFAULT_OPENROUTER_MODEL, managed_llm_settings_from_config
 from runtime_context import RuntimeContext
 from gui.i18n import tr
 from release_profile import app_version, show_advanced_ui
@@ -25,6 +26,19 @@ class ClinicalPage:
     widget: Any
 
 
+CLINICAL_NAV_ICONS = {
+    "home": "nav_home.svg",
+    "redcap": "nav_redcap.svg",
+    "import": "nav_import.svg",
+    "data_entry": "nav_edit.svg",
+    "advanced": "nav_advanced.svg",
+}
+
+
+def clinical_asset_path(filename: str) -> str:
+    return str(Path(__file__).with_name("assets") / filename)
+
+
 def build_default_llm_settings(runtime: RuntimeContext) -> dict[str, Any]:
     managed_settings = managed_llm_settings_from_config(getattr(runtime, "app_config", None))
     if managed_settings is not None:
@@ -35,7 +49,7 @@ def build_default_llm_settings(runtime: RuntimeContext) -> dict[str, Any]:
         return {
             "provider": "openai_compatible",
             "base_url": inference.openai_compatible_base_url or "",
-            "model": inference.openai_compatible_model or "qwen/qwen3.5-9b",
+            "model": inference.openai_compatible_model or DEFAULT_OPENROUTER_MODEL,
             "temperature": 0,
             "max_tokens": 8192,
             "timeout_seconds": int(inference.timeout_seconds),
@@ -60,7 +74,8 @@ def build_default_llm_settings(runtime: RuntimeContext) -> dict[str, Any]:
 
 class ClinicalMainWindow:
     def __init__(self, runtime: RuntimeContext) -> None:
-        from PySide6.QtCore import Qt
+        from PySide6.QtCore import QSize, Qt
+        from PySide6.QtGui import QIcon
         from PySide6.QtWidgets import (
             QComboBox,
             QFrame,
@@ -86,6 +101,7 @@ class ClinicalMainWindow:
         self._window.setObjectName("ClinicalMainWindow")
         self._window.setWindowTitle(tr("app_title", self.language))
         self._window.resize(runtime.settings.ui.window_width, runtime.settings.ui.window_height)
+        self._window.setMinimumSize(980, 680)
 
         self.workspace_page = WorkspacePage(runtime)
 
@@ -96,19 +112,20 @@ class ClinicalMainWindow:
 
         sidebar = QWidget()
         sidebar.setObjectName("ClinicalSidebar")
-        sidebar.setFixedWidth(248)
+        sidebar.setFixedWidth(226)
         sidebar_layout = QVBoxLayout(sidebar)
-        sidebar_layout.setContentsMargins(18, 22, 18, 18)
-        sidebar_layout.setSpacing(8)
+        sidebar_layout.setContentsMargins(16, 20, 16, 16)
+        sidebar_layout.setSpacing(7)
 
         brand_block = QFrame()
         brand_block.setObjectName("SidebarBrandBlock")
         brand_layout = QHBoxLayout(brand_block)
         brand_layout.setContentsMargins(0, 0, 0, 0)
         brand_layout.setSpacing(10)
-        app_mark = QLabel("LLM")
+        app_mark = QLabel("")
         app_mark.setObjectName("SidebarAppMark")
         app_mark.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        app_mark.setPixmap(QIcon(clinical_asset_path("app_shield.svg")).pixmap(QSize(20, 20)))
         brand_layout.addWidget(app_mark, 0, Qt.AlignmentFlag.AlignTop)
         brand_text = QVBoxLayout()
         brand_text.setContentsMargins(0, 0, 0, 0)
@@ -120,6 +137,7 @@ class ClinicalMainWindow:
         version_hint = QLabel(app_version(runtime.app_config))
         version_hint.setObjectName("SidebarVersionHint")
         version_hint.setWordWrap(True)
+        version_hint.setVisible(False)
         brand_text.addWidget(version_hint)
         brand_layout.addLayout(brand_text, 1)
         sidebar_layout.addWidget(brand_block)
@@ -127,6 +145,7 @@ class ClinicalMainWindow:
         subtitle = QLabel(tr("clinical_sidebar_subtitle_short", self.language))
         subtitle.setObjectName("SidebarSubtitle")
         subtitle.setWordWrap(True)
+        subtitle.setVisible(False)
         sidebar_layout.addWidget(subtitle)
         sidebar_layout.addSpacing(18)
 
@@ -146,7 +165,7 @@ class ClinicalMainWindow:
         self.data_entry_page = ClinicalDataEntryPage(runtime, change_dag=self.change_active_dag)
         self.import_page = ClinicalImportPage(
             runtime=runtime,
-            add_patient_documents=self.workspace_page.add_patient_documents_to_queue,
+            add_patient_documents=self.workspace_page.enqueue_patient_documents,
             remove_patient_at=self.workspace_page.remove_patient_queue_item,
             run_queue=self.workspace_page.run_patient_queue_extraction,
             import_excel=self.start_excel_import,
@@ -171,12 +190,20 @@ class ClinicalMainWindow:
             self.pages.append(ClinicalPage("advanced", "clinical_nav_advanced", self.workspace_page.widget))
         for page in self.pages:
             button = QPushButton(tr(page.label_key, self.language))
+            icon_name = CLINICAL_NAV_ICONS.get(page.key)
+            if icon_name:
+                button.setIcon(QIcon(clinical_asset_path(icon_name)))
+                button.setIconSize(QSize(18, 18))
             button.setProperty("nav", True)
             button.setMinimumHeight(44)
             button.clicked.connect(lambda checked=False, key=page.key: self.set_page(key))
             self.nav_buttons[page.key] = button
             sidebar_layout.addWidget(button)
-            self.stack.addWidget(self.build_scroll_page(page.widget, QScrollArea, QFrame, Qt))
+            if page.key == "data_entry":
+                page.widget.setProperty("clinicalPage", True)
+                self.stack.addWidget(page.widget)
+            else:
+                self.stack.addWidget(self.build_scroll_page(page.widget, QScrollArea, QFrame, Qt))
 
         sidebar_layout.addStretch(1)
         if self.show_advanced_ui:
@@ -192,8 +219,8 @@ class ClinicalMainWindow:
         content = QWidget()
         content.setObjectName("ClinicalContent")
         content_layout = QVBoxLayout(content)
-        content_layout.setContentsMargins(26, 20, 26, 24)
-        content_layout.setSpacing(14)
+        content_layout.setContentsMargins(20, 14, 20, 18)
+        content_layout.setSpacing(10)
         content_layout.addWidget(self.build_global_context_bar(QComboBox, QFrame, QHBoxLayout, QLabel, QVBoxLayout, Qt))
         content_layout.addWidget(self.stack)
 
@@ -213,72 +240,99 @@ class ClinicalMainWindow:
         vbox_layout_cls: Any,
         qt_cls: Any,
     ) -> Any:
-        bar = frame_cls()
+        from PySide6.QtCore import Signal
+
+        class ResponsiveContextBar(frame_cls):
+            resized = Signal(int)
+
+            def resizeEvent(inner_self, event: Any) -> None:
+                super().resizeEvent(event)
+                inner_self.resized.emit(event.size().width())
+
+        bar = ResponsiveContextBar()
         bar.setObjectName("GlobalContextBar")
         layout = hbox_layout_cls(bar)
-        layout.setContentsMargins(14, 10, 14, 10)
-        layout.setSpacing(12)
+        layout.setContentsMargins(13, 8, 13, 8)
+        # Keep the full active project visible at the supported 980 px minimum
+        # window width; the context bar has several compact, fixed-width items.
+        layout.setSpacing(6)
 
-        project_group = vbox_layout_cls()
-        project_group.setContentsMargins(0, 0, 0, 0)
-        project_group.setSpacing(3)
-        project_caption = label_cls(tr("clinical_global_project", self.language))
+        self.global_page_title = label_cls("")
+        self.global_page_title.setObjectName("GlobalPageTitle")
+        layout.addWidget(self.global_page_title, 0)
+
+        layout.addStretch(1)
+
+        project_caption = label_cls(f'{tr("clinical_global_project", self.language)}:')
         project_caption.setObjectName("GlobalContextCaption")
-        project_group.addWidget(project_caption)
+        self.global_project_caption = project_caption
+        layout.addWidget(project_caption, 0)
         self.connection_project_combo = combo_box_cls()
         self.connection_project_combo.setObjectName("GlobalProjectCombo")
-        self.connection_project_combo.setMinimumContentsLength(22)
+        self.connection_project_combo.setMinimumContentsLength(16)
+        self.connection_project_combo.setMinimumWidth(160)
+        self.connection_project_combo.setMaximumWidth(240)
         self.connection_project_combo.setSizeAdjustPolicy(combo_box_cls.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
         self.connection_project_combo.currentIndexChanged.connect(self.select_sidebar_project)
-        project_group.addWidget(self.connection_project_combo)
-        layout.addLayout(project_group, 2)
+        layout.addWidget(self.connection_project_combo, 0)
 
         separator_1 = label_cls("")
         separator_1.setObjectName("GlobalContextSeparator")
         layout.addWidget(separator_1)
 
-        user_group = vbox_layout_cls()
-        user_group.setContentsMargins(0, 0, 0, 0)
-        user_group.setSpacing(3)
-        user_caption = label_cls(tr("clinical_global_user", self.language))
+        user_caption = label_cls(f'{tr("clinical_global_user", self.language)}:')
         user_caption.setObjectName("GlobalContextCaption")
-        user_group.addWidget(user_caption)
+        self.global_user_caption = user_caption
+        layout.addWidget(user_caption, 0)
         self.global_user_context_label = label_cls(tr("clinical_user_context_missing", self.language))
         self.global_user_context_label.setObjectName("GlobalContextValue")
-        self.global_user_context_label.setWordWrap(True)
-        user_group.addWidget(self.global_user_context_label)
-        layout.addLayout(user_group, 2)
+        self.global_user_context_label.setMaximumWidth(150)
+        layout.addWidget(self.global_user_context_label, 0)
 
         separator_2 = label_cls("")
         separator_2.setObjectName("GlobalContextSeparator")
         layout.addWidget(separator_2)
 
-        dag_group = vbox_layout_cls()
-        dag_group.setContentsMargins(0, 0, 0, 0)
-        dag_group.setSpacing(3)
-        dag_caption = label_cls(tr("clinical_global_dag", self.language))
+        dag_caption = label_cls(f'{tr("clinical_global_dag", self.language)}:')
         dag_caption.setObjectName("GlobalContextCaption")
-        dag_group.addWidget(dag_caption)
+        self.global_dag_caption = dag_caption
+        layout.addWidget(dag_caption, 0)
+        self.global_dag_value_label = label_cls(tr("clinical_dag_none", self.language))
+        self.global_dag_value_label.setObjectName("GlobalContextValue")
+        self.global_dag_value_label.setMaximumWidth(140)
+        layout.addWidget(self.global_dag_value_label, 0)
         self.global_dag_combo = combo_box_cls()
         self.global_dag_combo.setObjectName("GlobalDagCombo")
-        self.global_dag_combo.setMinimumContentsLength(18)
+        self.global_dag_combo.setMinimumContentsLength(12)
+        self.global_dag_combo.setMinimumWidth(205)
+        self.global_dag_combo.setMaximumWidth(260)
         self.global_dag_combo.currentIndexChanged.connect(self.on_global_dag_changed)
-        dag_group.addWidget(self.global_dag_combo)
-        layout.addLayout(dag_group, 2)
+        layout.addWidget(self.global_dag_combo, 0)
 
-        layout.addStretch(1)
-        status = label_cls("LLM Extractor")
-        status.setObjectName("GlobalContextAppLabel")
-        status.setAlignment(qt_cls.AlignmentFlag.AlignRight | qt_cls.AlignmentFlag.AlignVCenter)
-        layout.addWidget(status, 0)
+        self.global_connection_indicator = label_cls("●")
+        self.global_connection_indicator.setObjectName("GlobalConnectionIndicator")
+        self.global_connection_indicator.setAlignment(qt_cls.AlignmentFlag.AlignCenter)
+        layout.addWidget(self.global_connection_indicator, 0)
+        bar.resized.connect(self.apply_global_context_density)
         return bar
+
+    def apply_global_context_density(self, width: int) -> None:
+        compact = int(width) < 800
+        for caption in (
+            self.global_project_caption,
+            self.global_user_caption,
+            self.global_dag_caption,
+        ):
+            caption.setVisible(not compact)
 
     def build_scroll_page(self, widget: Any, scroll_area_cls: Any, frame_cls: Any, qt_cls: Any) -> Any:
         scroll = scroll_area_cls()
         scroll.setObjectName("ClinicalPageScroll")
+        scroll.viewport().setObjectName("ClinicalPageViewport")
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(frame_cls.Shape.NoFrame)
         scroll.setHorizontalScrollBarPolicy(qt_cls.ScrollBarPolicy.ScrollBarAlwaysOff)
+        widget.setProperty("clinicalPage", True)
         scroll.setWidget(widget)
         return scroll
 
@@ -292,16 +346,32 @@ class ClinicalMainWindow:
     def refresh_global_context(self) -> None:
         project = current_redcap_project_token(self.runtime.settings)
         if project is None:
-            self.global_user_context_label.setText(tr("clinical_user_context_missing", self.language))
+            self.global_user_context_label.setText(tr("clinical_user_unknown", self.language))
+            self.global_dag_value_label.setText(tr("clinical_dag_none", self.language))
         else:
-            self.global_user_context_label.setText(format_project_user_context(project, self.language))
+            self.global_user_context_label.setText(project.username or tr("clinical_user_unknown", self.language))
+            self.global_dag_value_label.setText(
+                project.data_access_group
+                or project.data_access_group_unique_name
+                or tr("clinical_dag_none", self.language)
+            )
+        self.global_dag_value_label.setToolTip(self.global_dag_value_label.text())
         self._updating_global_dag_combo = True
         self.global_dag_combo.blockSignals(True)
         configure_dag_switch_combo(self.global_dag_combo, project, self.language)
         self.global_dag_combo.blockSignals(False)
         self._updating_global_dag_combo = False
+        self.global_dag_value_label.setVisible(self.global_dag_combo.isHidden())
+        self.global_connection_indicator.setProperty("connected", project is not None)
+        self.global_connection_indicator.setToolTip(
+            tr("clinical_home_server_configured", self.language)
+            if project is not None
+            else tr("clinical_home_server_not_configured", self.language)
+        )
         repolish(self.global_user_context_label)
+        repolish(self.global_dag_value_label)
         repolish(self.global_dag_combo)
+        repolish(self.global_connection_indicator)
 
     def on_global_dag_changed(self) -> None:
         if self._updating_global_dag_combo:
@@ -312,6 +382,8 @@ class ClinicalMainWindow:
         self.change_active_dag(option)
 
     def populate_connection_project_combo(self) -> None:
+        from PySide6.QtCore import Qt
+
         current_project_id = self.runtime.settings.redcap.selected_project_id
         projects = list(self.runtime.settings.redcap.saved_project_tokens)
         self._updating_connection_combo = True
@@ -324,9 +396,11 @@ class ClinicalMainWindow:
         else:
             self.connection_project_combo.setEnabled(True)
             for project in projects:
-                self.connection_project_combo.addItem(
-                    tr("clinical_connected_project", self.language, project=project.project_name),
-                    project.project_id,
+                self.connection_project_combo.addItem(project.project_name, project.project_id)
+                self.connection_project_combo.setItemData(
+                    self.connection_project_combo.count() - 1,
+                    project.project_name,
+                    Qt.ItemDataRole.ToolTipRole,
                 )
             if current_project_id:
                 index = self.connection_project_combo.findData(current_project_id)
@@ -334,9 +408,7 @@ class ClinicalMainWindow:
                     self.connection_project_combo.setCurrentIndex(index)
             selected = self.connection_project_combo.currentText()
             self.connection_project_combo.setToolTip(selected)
-            view = self.connection_project_combo.view()
-            if view is not None:
-                view.setMinimumWidth(360)
+            configure_combo_popup_width(self.connection_project_combo)
         self.connection_project_combo.blockSignals(False)
         self._updating_connection_combo = False
 
@@ -705,7 +777,10 @@ class ClinicalMainWindow:
             self.workspace_page.refresh_redcap_projects()
         if key == "data_entry":
             self.data_entry_page.refresh_project_state()
-        self.stack.setCurrentIndex(page_keys.index(key))
+        page_index = page_keys.index(key)
+        self.stack.setCurrentIndex(page_index)
+        page = self.pages[page_index]
+        self.global_page_title.setText(tr(page.label_key, self.language))
         for item_key, button in self.nav_buttons.items():
             button.setProperty("active", item_key == key)
             button.style().unpolish(button)
@@ -749,14 +824,15 @@ class ClinicalHomePage:
         dashboard_header = QFrame()
         dashboard_header.setObjectName("DashboardHeader")
         header_layout = QHBoxLayout(dashboard_header)
-        header_layout.setContentsMargins(24, 22, 24, 22)
-        header_layout.setSpacing(18)
+        header_layout.setContentsMargins(4, 4, 4, 7)
+        header_layout.setSpacing(12)
 
         greeting_group = QVBoxLayout()
         greeting_group.setContentsMargins(0, 0, 0, 0)
         greeting_group.setSpacing(7)
         eyebrow = QLabel(tr("clinical_home_eyebrow", self.language))
         eyebrow.setObjectName("DashboardEyebrow")
+        eyebrow.setVisible(False)
         greeting_group.addWidget(eyebrow)
         self.welcome_label = QLabel("")
         self.welcome_label.setObjectName("PageTitle")
@@ -843,7 +919,7 @@ class ClinicalHomePage:
         action_grid.setSpacing(12)
         action_grid.addWidget(
             build_dashboard_action_card(
-                code="01",
+                icon_name="action_edit.svg",
                 title=tr("clinical_card_data_entry_title", self.language).replace("4. ", ""),
                 body=tr("clinical_card_data_entry_body", self.language),
                 primary_label=tr("clinical_card_data_entry_action", self.language),
@@ -854,7 +930,7 @@ class ClinicalHomePage:
         )
         action_grid.addWidget(
             build_dashboard_action_card(
-                code="02",
+                icon_name="action_document.svg",
                 title=tr("clinical_card_document_title", self.language).replace("2. ", ""),
                 body=tr("clinical_card_document_body", self.language),
                 primary_label=tr("clinical_card_document_action", self.language),
@@ -865,7 +941,7 @@ class ClinicalHomePage:
         )
         action_grid.addWidget(
             build_dashboard_action_card(
-                code="03",
+                icon_name="action_excel.svg",
                 title=tr("clinical_card_excel_title", self.language).replace("3. ", ""),
                 body=tr("clinical_card_excel_body", self.language),
                 primary_label=tr("clinical_card_excel_action", self.language),
@@ -876,7 +952,7 @@ class ClinicalHomePage:
         )
         action_grid.addWidget(
             build_dashboard_action_card(
-                code="04",
+                icon_name="action_redcap.svg",
                 title=tr("clinical_card_redcap_title", self.language).replace("1. ", ""),
                 body=tr("clinical_card_redcap_body", self.language),
                 primary_label=tr("clinical_card_redcap_action", self.language),
@@ -987,9 +1063,9 @@ class ClinicalHomePage:
         set_dashboard_status_row(
             self.system_redcap_row,
             tr("clinical_home_system_server", self.language),
-            tr("clinical_home_server_online", self.language)
+            tr("clinical_home_server_configured", self.language)
             if project
-            else tr("clinical_home_server_offline", self.language),
+            else tr("clinical_home_server_not_configured", self.language),
         )
         llm_provider = managed_llm_settings_from_config(getattr(self.runtime, "app_config", None))
         llm_status = (
@@ -1051,6 +1127,7 @@ class ClinicalHomePage:
 class ClinicalRedcapPage:
     def __init__(self, *, runtime: RuntimeContext, on_saved: Callable[[], None]) -> None:
         from PySide6.QtWidgets import (
+            QBoxLayout,
             QComboBox,
             QFormLayout,
             QFrame,
@@ -1059,6 +1136,7 @@ class ClinicalRedcapPage:
             QLineEdit,
             QMessageBox,
             QPushButton,
+            QSizePolicy,
             QVBoxLayout,
             QWidget,
         )
@@ -1076,18 +1154,19 @@ class ClinicalRedcapPage:
         self.widget = QWidget()
         layout = QVBoxLayout(self.widget)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(18)
+        layout.setSpacing(10)
 
         header = QFrame()
         header.setObjectName("PageHeader")
         header_layout = QHBoxLayout(header)
-        header_layout.setContentsMargins(22, 18, 22, 18)
-        header_layout.setSpacing(16)
+        header_layout.setContentsMargins(4, 3, 4, 5)
+        header_layout.setSpacing(8)
         title_group = QVBoxLayout()
         title_group.setContentsMargins(0, 0, 0, 0)
         title_group.setSpacing(7)
         title = QLabel(tr("clinical_redcap_title", self.language))
         title.setObjectName("PageTitle")
+        title.setVisible(False)
         title_group.addWidget(title)
         desc = QLabel(tr("clinical_redcap_desc", self.language))
         desc.setObjectName("MutedLabel")
@@ -1117,11 +1196,9 @@ class ClinicalRedcapPage:
         panel_layout.setContentsMargins(18, 18, 18, 18)
         panel_layout.setSpacing(12)
 
-        connection_columns = QHBoxLayout()
-        connection_columns.setSpacing(14)
-
         form_card = QFrame()
         form_card.setObjectName("ConnectionInnerCard")
+        form_card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         form_card_layout = QVBoxLayout(form_card)
         form_card_layout.setContentsMargins(18, 16, 18, 16)
         form_card_layout.setSpacing(12)
@@ -1131,14 +1208,20 @@ class ClinicalRedcapPage:
 
         form = QFormLayout()
         form.setSpacing(10)
+        form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
+        form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapLongRows)
         configured_url = (
             runtime.settings.redcap.api_url
             or str(runtime.app_config.get("redcap", {}).get("api_url", "") or "")
         )
         self.api_url_input = QLineEdit(configured_url)
+        self.api_url_input.setMinimumWidth(240)
+        self.api_url_input.setToolTip(configured_url)
+        self.api_url_input.setCursorPosition(0)
         allow_api_url_edit = bool(runtime.app_config.get("redcap", {}).get("allow_api_url_edit", False)) or not configured_url
         self.api_url_input.setReadOnly(not allow_api_url_edit)
         self.token_input = QLineEdit("")
+        self.token_input.setMinimumWidth(240)
         self.token_input.setEchoMode(QLineEdit.EchoMode.Password)
         form.addRow(tr("redcap_api_url", self.language), self.api_url_input)
         form.addRow(tr("redcap_api_token", self.language), self.token_input)
@@ -1146,6 +1229,7 @@ class ClinicalRedcapPage:
 
         buttons = QHBoxLayout()
         self.validate_button = QPushButton(tr("clinical_validate_token", self.language))
+        self.validate_button.setProperty("secondary", True)
         self.validate_button.clicked.connect(self.validate_token)
         self.save_button = QPushButton(tr("clinical_save_connection", self.language))
         self.save_button.clicked.connect(self.save_connection)
@@ -1153,12 +1237,13 @@ class ClinicalRedcapPage:
         self.remove_button.setProperty("secondary", True)
         self.remove_button.clicked.connect(self.remove_saved_project)
         buttons.addWidget(self.validate_button)
-        buttons.addWidget(self.save_button)
         buttons.addStretch(1)
+        buttons.addWidget(self.save_button)
         form_card_layout.addLayout(buttons)
 
         summary_card = QFrame()
         summary_card.setObjectName("ConnectionInnerCard")
+        summary_card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         summary_layout = QVBoxLayout(summary_card)
         summary_layout.setContentsMargins(18, 16, 18, 16)
         summary_layout.setSpacing(12)
@@ -1167,13 +1252,18 @@ class ClinicalRedcapPage:
         summary_layout.addWidget(summary_title)
         summary_form = QFormLayout()
         summary_form.setSpacing(10)
+        summary_form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
+        summary_form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapLongRows)
         self.project_value = QLabel("-")
         self.project_value.setObjectName("ReadonlyInfoValue")
         self.project_value.setWordWrap(True)
+        self.project_value.setMinimumWidth(170)
         self.user_context_value = QLabel("-")
         self.user_context_value.setObjectName("ReadonlyInfoValue")
         self.user_context_value.setWordWrap(True)
+        self.user_context_value.setMinimumWidth(170)
         self.saved_projects = QComboBox()
+        self.saved_projects.setMinimumWidth(170)
         summary_form.addRow(tr("validated_project", self.language), self.project_value)
         summary_form.addRow(tr("redcap_user_context", self.language), self.user_context_value)
         summary_form.addRow(tr("saved_redcap_projects", self.language), self.saved_projects)
@@ -1184,13 +1274,51 @@ class ClinicalRedcapPage:
         summary_layout.addLayout(remove_row)
         summary_layout.addStretch(1)
 
-        connection_columns.addWidget(form_card, 3)
-        connection_columns.addWidget(summary_card, 2)
-        panel_layout.addLayout(connection_columns)
+        class ResponsiveConnectionColumns(QWidget):
+            """Keep both cards readable instead of squeezing their form fields."""
+
+            STACK_BREAKPOINT = 860
+
+            def __init__(self, primary: QWidget, secondary: QWidget) -> None:
+                super().__init__()
+                self.box_layout = QBoxLayout(QBoxLayout.Direction.LeftToRight, self)
+                self.box_layout.setContentsMargins(0, 0, 0, 0)
+                self.box_layout.setSpacing(14)
+                self.box_layout.addWidget(primary)
+                self.box_layout.addWidget(secondary)
+                self._stacked: bool | None = None
+                self.update_direction(self.width())
+
+            def update_direction(self, width: int) -> None:
+                stacked = width < self.STACK_BREAKPOINT
+                if self._stacked == stacked:
+                    return
+                self._stacked = stacked
+                self.setProperty("stacked", stacked)
+                self.box_layout.setDirection(
+                    QBoxLayout.Direction.TopToBottom
+                    if stacked
+                    else QBoxLayout.Direction.LeftToRight
+                )
+                if stacked:
+                    self.box_layout.setStretch(0, 0)
+                    self.box_layout.setStretch(1, 0)
+                else:
+                    self.box_layout.setStretch(0, 3)
+                    self.box_layout.setStretch(1, 2)
+
+            def resizeEvent(self, event: Any) -> None:
+                self.update_direction(event.size().width())
+                super().resizeEvent(event)
+
+        self.connection_columns_widget = ResponsiveConnectionColumns(form_card, summary_card)
+        self.connection_columns_layout = self.connection_columns_widget.box_layout
+        panel_layout.addWidget(self.connection_columns_widget)
 
         self.status = QLabel("")
         self.status.setObjectName("WizardStatus")
         self.status.setWordWrap(True)
+        self.status.setVisible(False)
         panel_layout.addWidget(self.status)
 
         self.populate_saved_projects()
@@ -1204,11 +1332,27 @@ class ClinicalRedcapPage:
     def get_api_url(self) -> str:
         return self.api_url_input.text().strip()
 
+    def set_api_url_display(self, value: str) -> None:
+        value = str(value or "")
+        self.api_url_input.setText(value)
+        self.api_url_input.setToolTip(value)
+        self.api_url_input.setCursorPosition(0)
+
+    def set_connection_summary(self, project_text: str, user_context_text: str) -> None:
+        self.project_value.setText(project_text)
+        self.project_value.setToolTip(project_text)
+        self.user_context_value.setText(user_context_text)
+        self.user_context_value.setToolTip(user_context_text)
+
+    def set_status(self, text: str) -> None:
+        self.status.setText(text)
+        self.status.setVisible(bool(str(text).strip()))
+
     def validate_token(self) -> None:
         api_url = self.get_api_url()
         token = self.token_input.text().strip()
         if not api_url or not token:
-            self.status.setText(tr("redcap_missing_credentials", self.language))
+            self.set_status(tr("redcap_missing_credentials", self.language))
             return
         try:
             client = self.RedcapClient(api_url=api_url, api_token=token)
@@ -1216,22 +1360,22 @@ class ClinicalRedcapPage:
         except self.RedcapAPIError as exc:
             self.validated_project = None
             self.validated_user_context = None
-            self.project_value.setText("-")
-            self.user_context_value.setText("-")
-            self.status.setText(str(exc))
+            self.set_connection_summary("-", "-")
+            self.set_status(str(exc))
             return
         if project is None:
             self.validated_project = None
             self.validated_user_context = None
-            self.project_value.setText("-")
-            self.user_context_value.setText("-")
-            self.status.setText(tr("redcap_no_projects", self.language))
+            self.set_connection_summary("-", "-")
+            self.set_status(tr("redcap_no_projects", self.language))
             return
         self.validated_user_context = self.fetch_user_context(client)
         self.validated_project = project
-        self.project_value.setText(f"{project.project_title} ({project.project_id})")
-        self.user_context_value.setText(format_redcap_user_context(self.validated_user_context, self.language))
-        self.status.setText(tr("redcap_project_validated", self.language, project=project.project_title))
+        self.set_connection_summary(
+            f"{project.project_title} ({project.project_id})",
+            format_redcap_user_context(self.validated_user_context, self.language),
+        )
+        self.set_status(tr("redcap_project_validated", self.language, project=project.project_title))
         self.save_connection()
 
     def fetch_user_context(self, client) -> Any:
@@ -1266,7 +1410,7 @@ class ClinicalRedcapPage:
         token = self.token_input.text().strip()
         project = self.validated_project
         if not api_url or not token or project is None:
-            self.status.setText(tr("redcap_validate_before_save", self.language))
+            self.set_status(tr("redcap_validate_before_save", self.language))
             return
         token_secret_name = build_redcap_token_secret_name(project.project_id)
         self.runtime.secrets_store.set(token_secret_name, token)
@@ -1293,7 +1437,7 @@ class ClinicalRedcapPage:
         self.runtime.settings_store.save(settings)
         self.populate_saved_projects()
         self.update_selected_project_display()
-        self.status.setText(
+        self.set_status(
             tr(
                 "redcap_project_replaced" if replacing_existing else "redcap_project_saved",
                 self.language,
@@ -1320,7 +1464,7 @@ class ClinicalRedcapPage:
         settings.preferred_project_config_path = str(config_path)
         self.runtime.settings_store.save(settings)
         self.token_input.clear()
-        self.status.setText(
+        self.set_status(
             tr(
                 "redcap_project_replaced" if replacing_existing else "redcap_project_saved",
                 self.language,
@@ -1330,25 +1474,33 @@ class ClinicalRedcapPage:
         self.on_saved()
 
     def populate_saved_projects(self) -> None:
+        from PySide6.QtCore import Qt
+
         self.saved_projects.blockSignals(True)
         self.saved_projects.clear()
         self.saved_projects.addItem(tr("redcap_saved_placeholder", self.language), "")
         for project in self.runtime.settings.redcap.saved_project_tokens:
             self.saved_projects.addItem(project.project_name, project.project_id)
+            self.saved_projects.setItemData(
+                self.saved_projects.count() - 1,
+                project.project_name,
+                Qt.ItemDataRole.ToolTipRole,
+            )
         selected_id = self.runtime.settings.redcap.selected_project_id
         if selected_id:
             index = self.saved_projects.findData(selected_id)
             if index >= 0:
                 self.saved_projects.setCurrentIndex(index)
         self.saved_projects.blockSignals(False)
+        self.saved_projects.setToolTip(self.saved_projects.currentText())
+        configure_combo_popup_width(self.saved_projects)
         self.update_selected_project_display()
         self.refresh_remove_button()
 
     def update_selected_project_display(self) -> None:
         project_id = self.runtime.settings.redcap.selected_project_id
         if not project_id:
-            self.project_value.setText("-")
-            self.user_context_value.setText("-")
+            self.set_connection_summary("-", "-")
             self.header_project_status.setObjectName("WarningPill")
             self.header_project_status.setText(tr("clinical_setup_required_status", self.language))
             self.header_user_context.setText(tr("clinical_user_context_missing", self.language))
@@ -1358,9 +1510,11 @@ class ClinicalRedcapPage:
         for project in self.runtime.settings.redcap.saved_project_tokens:
             if project.project_id != str(project_id):
                 continue
-            self.api_url_input.setText(project.api_url)
-            self.project_value.setText(f"{project.project_name} ({project.project_id})")
-            self.user_context_value.setText(format_project_user_context(project, self.language))
+            self.set_api_url_display(project.api_url)
+            self.set_connection_summary(
+                f"{project.project_name} ({project.project_id})",
+                format_project_user_context(project, self.language),
+            )
             self.header_project_status.setObjectName("StatusPill")
             self.header_project_status.setText(tr("clinical_ready_status", self.language, project=project.project_name))
             self.header_user_context.setText(format_project_user_context(project, self.language))
@@ -1369,6 +1523,7 @@ class ClinicalRedcapPage:
             return
 
     def select_saved_project(self) -> None:
+        self.saved_projects.setToolTip(self.saved_projects.currentText())
         project_id = self.saved_projects.currentData()
         if not project_id:
             return
@@ -1381,10 +1536,12 @@ class ClinicalRedcapPage:
             settings.redcap.selected_project_name = project.project_name
             settings.redcap.selected_project_token_secret_name = project.token_secret_name
             self.runtime.settings_store.save(settings)
-            self.api_url_input.setText(project.api_url)
-            self.project_value.setText(f"{project.project_name} ({project.project_id})")
-            self.user_context_value.setText(format_project_user_context(project, self.language))
-            self.status.setText(tr("redcap_project_selected", self.language, project=project.project_name))
+            self.set_api_url_display(project.api_url)
+            self.set_connection_summary(
+                f"{project.project_name} ({project.project_id})",
+                format_project_user_context(project, self.language),
+            )
+            self.set_status(tr("redcap_project_selected", self.language, project=project.project_name))
             self.on_saved()
             return
 
@@ -1393,7 +1550,7 @@ class ClinicalRedcapPage:
 
         project = self.current_saved_project()
         if project is None:
-            self.status.setText(tr("redcap_remove_no_saved_selection", self.language))
+            self.set_status(tr("redcap_remove_no_saved_selection", self.language))
             return
         answer = QMessageBox.question(
             self.widget,
@@ -1431,7 +1588,7 @@ class ClinicalRedcapPage:
         self.token_input.clear()
         self.populate_saved_projects()
         self.update_selected_project_display()
-        self.status.setText(tr("redcap_project_removed", self.language, project=project.project_name))
+        self.set_status(tr("redcap_project_removed", self.language, project=project.project_name))
         self.on_saved()
 
     def current_saved_project(self) -> RedcapProjectToken | None:
@@ -1453,7 +1610,7 @@ class ClinicalImportPage:
         self,
         *,
         runtime: RuntimeContext,
-        add_patient_documents: Callable[[], bool | None],
+        add_patient_documents: Callable[..., tuple[bool, str] | bool | None],
         remove_patient_at: Callable[[int], bool],
         run_queue: Callable[[], None],
         import_excel: Callable[[Callable[[], None] | None], bool | None],
@@ -1467,6 +1624,8 @@ class ClinicalImportPage:
         change_dag: Callable[[dict[str, Any]], None] | None = None,
         show_advanced: bool = False,
     ) -> None:
+        from PySide6.QtCore import QSize
+        from PySide6.QtGui import QIcon
         from PySide6.QtWidgets import (
             QComboBox,
             QFrame,
@@ -1497,19 +1656,21 @@ class ClinicalImportPage:
         self.excel_step = 0
         self.document_step_labels = []
         self.excel_step_labels = []
+        self.document_draft_paths: list[str] = []
         self.widget = QWidget()
         layout = QVBoxLayout(self.widget)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(14)
+        layout.setSpacing(12)
 
         header = QFrame()
         header.setObjectName("PageHeader")
         header_layout = QHBoxLayout(header)
-        header_layout.setContentsMargins(18, 16, 18, 16)
-        header_layout.setSpacing(14)
+        header_layout.setContentsMargins(4, 3, 4, 5)
+        header_layout.setSpacing(8)
         title_group = QVBoxLayout()
         title = QLabel(tr("clinical_import_title", self.language))
         title.setObjectName("PageTitle")
+        title.setVisible(False)
         title_group.addWidget(title)
         subtitle = QLabel(tr("clinical_import_subtitle", self.language))
         subtitle.setObjectName("MutedLabel")
@@ -1542,10 +1703,18 @@ class ClinicalImportPage:
         source_row = QHBoxLayout()
         source_row.setSpacing(10)
         self.document_mode_button = QPushButton(tr("clinical_source_documents", self.language))
+        self.document_mode_button.setObjectName("SourceModeButton")
         self.document_mode_button.setProperty("tab", True)
+        self.document_mode_button.setIcon(QIcon(clinical_asset_path("action_document.svg")))
+        self.document_mode_button.setIconSize(QSize(22, 22))
+        self.document_mode_button.setMinimumWidth(210)
         self.document_mode_button.clicked.connect(lambda: self.set_flow("documents"))
         self.excel_mode_button = QPushButton(tr("clinical_source_excel", self.language))
+        self.excel_mode_button.setObjectName("SourceModeButton")
         self.excel_mode_button.setProperty("tab", True)
+        self.excel_mode_button.setIcon(QIcon(clinical_asset_path("action_excel.svg")))
+        self.excel_mode_button.setIconSize(QSize(22, 22))
+        self.excel_mode_button.setMinimumWidth(210)
         self.excel_mode_button.clicked.connect(lambda: self.set_flow("excel"))
         source_row.addWidget(self.document_mode_button)
         source_row.addWidget(self.excel_mode_button)
@@ -1604,6 +1773,8 @@ class ClinicalImportPage:
         self.refresh()
 
     def build_document_flow(self):
+        from PySide6.QtCore import QSize, Qt
+        from PySide6.QtGui import QIcon
         from PySide6.QtWidgets import (
             QFrame,
             QHBoxLayout,
@@ -1634,22 +1805,7 @@ class ClinicalImportPage:
         self.document_queue_status = QLabel("")
         self.document_scope_status = QLabel("")
         self.document_review_status = QLabel("")
-        self.document_patient_queue_list = QListWidget()
-        self.document_patient_queue_list.setObjectName("WizardQueueList")
-
-        self.document_stack.addWidget(
-            self.build_wizard_page(
-                number="01",
-                title=tr("clinical_document_queue_title", self.language),
-                body=tr("clinical_document_queue_body", self.language),
-                status_label=self.document_queue_status,
-                extra_widget=self.document_patient_queue_list,
-                actions=[
-                    (tr("clinical_add_patient_to_queue", self.language), self.add_patient, False),
-                    (tr("remove_selected_patient", self.language), self.remove_selected_patient, True),
-                ],
-            )
-        )
+        self.document_stack.addWidget(self.build_document_queue_page())
         self.document_stack.addWidget(
             self.build_wizard_page(
                 number="02",
@@ -1684,6 +1840,7 @@ class ClinicalImportPage:
         guidance_body.setObjectName("MutedLabel")
         guidance_body.setWordWrap(True)
         guidance_layout.addWidget(guidance_body)
+        guidance.setVisible(False)
         layout.addWidget(guidance)
 
         footer = QHBoxLayout()
@@ -1698,6 +1855,300 @@ class ClinicalImportPage:
         footer.addWidget(self.document_next_button)
         layout.addLayout(footer)
         return page
+
+    def build_document_queue_page(self):
+        from PySide6.QtCore import QSize, Qt
+        from PySide6.QtGui import QIcon
+        from PySide6.QtWidgets import (
+            QComboBox,
+            QFrame,
+            QGridLayout,
+            QHBoxLayout,
+            QLabel,
+            QLineEdit,
+            QListWidget,
+            QPushButton,
+            QStackedWidget,
+            QVBoxLayout,
+        )
+
+        panel = QFrame()
+        panel.setObjectName("WizardPanel")
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(20, 12, 20, 12)
+        layout.setSpacing(7)
+
+        number_label = QLabel("01")
+        number_label.setObjectName("StepNumber")
+        layout.addWidget(number_label)
+        title = QLabel(tr("clinical_document_queue_title", self.language))
+        title.setObjectName("SectionTitle")
+        layout.addWidget(title)
+        body = QLabel(tr("clinical_document_queue_body", self.language))
+        body.setObjectName("MutedLabel")
+        body.setWordWrap(True)
+        layout.addWidget(body)
+        self.document_queue_status.setObjectName("WizardStatus")
+        self.document_queue_status.setWordWrap(False)
+
+        draft_row = QHBoxLayout()
+        draft_row.setSpacing(10)
+
+        patient_card = QFrame()
+        patient_card.setObjectName("InlineDraftCard")
+        patient_layout = QVBoxLayout(patient_card)
+        patient_layout.setContentsMargins(14, 12, 14, 12)
+        patient_layout.setSpacing(8)
+        patient_title = QLabel(tr("clinical_document_draft_patient_title", self.language))
+        patient_title.setObjectName("SectionLabel")
+        patient_layout.addWidget(patient_title)
+        patient_form = QGridLayout()
+        patient_form.setContentsMargins(0, 0, 0, 0)
+        patient_form.setHorizontalSpacing(8)
+        patient_form.setVerticalSpacing(5)
+        self.document_queue_label_input = QLineEdit("")
+        self.document_queue_label_input.setPlaceholderText(
+            tr("clinical_document_queue_label_placeholder", self.language)
+        )
+        self.document_patient_mode_input = QComboBox()
+        self.document_patient_mode_input.addItem(tr("patient_mode_new", self.language), "new")
+        self.document_patient_mode_input.addItem(tr("patient_mode_existing", self.language), "existing")
+        self.document_identifier_type_input = QComboBox()
+        self.document_identifier_type_input.addItem(
+            tr("patient_identifier_record_id", self.language),
+            "record_id",
+        )
+        self.document_identifier_type_input.addItem(
+            tr("patient_identifier_tc", self.language),
+            "tc_kimlik_no",
+        )
+        self.document_identifier_value_input = QLineEdit("")
+        queue_label = QLabel(tr("patient_queue_label", self.language))
+        mode_label = QLabel(tr("patient_mode_label", self.language))
+        self.document_identifier_type_label = QLabel(tr("patient_identifier_type", self.language))
+        self.document_identifier_value_label = QLabel(tr("patient_identifier_value", self.language))
+        for field_label in (
+            queue_label,
+            mode_label,
+            self.document_identifier_type_label,
+            self.document_identifier_value_label,
+        ):
+            field_label.setObjectName("InlineFieldLabel")
+        patient_form.addWidget(queue_label, 0, 0)
+        patient_form.addWidget(mode_label, 0, 1)
+        patient_form.addWidget(self.document_queue_label_input, 1, 0)
+        patient_form.addWidget(self.document_patient_mode_input, 1, 1)
+        patient_form.addWidget(self.document_identifier_type_label, 2, 0)
+        patient_form.addWidget(self.document_identifier_value_label, 2, 1)
+        patient_form.addWidget(self.document_identifier_type_input, 3, 0)
+        patient_form.addWidget(self.document_identifier_value_input, 3, 1)
+        patient_form.setColumnStretch(0, 1)
+        patient_form.setColumnStretch(1, 1)
+        patient_layout.addLayout(patient_form)
+        self.document_enqueue_button = QPushButton(tr("clinical_document_add_to_queue", self.language))
+        self.document_enqueue_button.setProperty("compact", True)
+        self.document_enqueue_button.clicked.connect(self.enqueue_document_draft)
+        patient_layout.addWidget(self.document_enqueue_button)
+        draft_row.addWidget(patient_card, 1)
+
+        documents_card = QFrame()
+        documents_card.setObjectName("InlineDraftCard")
+        documents_layout = QVBoxLayout(documents_card)
+        documents_layout.setContentsMargins(14, 12, 14, 12)
+        documents_layout.setSpacing(8)
+        documents_title = QLabel(tr("clinical_patient_documents", self.language))
+        documents_title.setObjectName("SectionLabel")
+        documents_layout.addWidget(documents_title)
+        self.document_draft_list = QListWidget()
+        self.document_draft_list.setObjectName("DocumentDraftList")
+        self.document_draft_list.setSelectionMode(QListWidget.SelectionMode.ExtendedSelection)
+        self.document_draft_list.setMinimumHeight(54)
+        self.document_draft_list.setMaximumHeight(54)
+        documents_layout.addWidget(self.document_draft_list)
+        documents_buttons = QHBoxLayout()
+        documents_buttons.setSpacing(7)
+        select_button = QPushButton(tr("clinical_add_documents_to_patient", self.language))
+        select_button.setProperty("compact", True)
+        select_button.clicked.connect(self.select_document_draft_files)
+        remove_button = QPushButton(tr("clinical_remove_selected_documents", self.language))
+        remove_button.setProperty("secondary", True)
+        remove_button.setProperty("compact", True)
+        remove_button.clicked.connect(self.remove_selected_document_drafts)
+        clear_button = QPushButton(tr("clear_documents", self.language))
+        clear_button.setProperty("secondary", True)
+        clear_button.setProperty("compact", True)
+        clear_button.clicked.connect(self.clear_document_draft)
+        documents_buttons.addWidget(select_button)
+        documents_buttons.addWidget(remove_button)
+        documents_buttons.addWidget(clear_button)
+        documents_layout.addLayout(documents_buttons)
+        self.document_draft_status = QLabel("")
+        self.document_draft_status.setObjectName("InlineDraftStatus")
+        self.document_draft_status.setWordWrap(True)
+        documents_layout.addWidget(self.document_draft_status)
+        draft_row.addWidget(documents_card, 1)
+        layout.addLayout(draft_row)
+
+        queue_header = QHBoxLayout()
+        queue_title = QLabel(tr("clinical_document_queue_list_title", self.language))
+        queue_title.setObjectName("SectionLabel")
+        queue_header.addWidget(queue_title)
+        self.document_queue_status.setObjectName("InlineQueueCount")
+        queue_header.addWidget(self.document_queue_status)
+        queue_header.addStretch(1)
+        self.document_remove_patient_button = QPushButton(tr("remove_selected_patient", self.language))
+        self.document_remove_patient_button.setProperty("secondary", True)
+        self.document_remove_patient_button.setProperty("compact", True)
+        self.document_remove_patient_button.clicked.connect(self.remove_selected_patient)
+        queue_header.addWidget(self.document_remove_patient_button)
+        layout.addLayout(queue_header)
+
+        self.document_patient_queue_list = QListWidget()
+        self.document_patient_queue_list.setObjectName("WizardQueueList")
+        self.document_patient_queue_list.currentRowChanged.connect(
+            lambda row: self.document_remove_patient_button.setEnabled(row >= 0)
+        )
+        self.document_queue_stack = QStackedWidget()
+        self.document_queue_stack.setObjectName("DocumentQueueStack")
+        empty_queue = QFrame()
+        empty_queue.setObjectName("DocumentDropZone")
+        empty_layout = QHBoxLayout(empty_queue)
+        empty_layout.setContentsMargins(14, 10, 14, 10)
+        empty_layout.setSpacing(10)
+        empty_icon = QLabel("")
+        empty_icon.setObjectName("DocumentDropZoneIcon")
+        empty_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        empty_icon.setPixmap(QIcon(clinical_asset_path("action_document.svg")).pixmap(QSize(18, 18)))
+        empty_text = QLabel(tr("clinical_document_queue_status_empty", self.language))
+        empty_text.setObjectName("MutedLabel")
+        empty_text.setWordWrap(True)
+        empty_layout.addWidget(empty_icon)
+        empty_layout.addWidget(empty_text, 1)
+        self.document_queue_stack.addWidget(empty_queue)
+        self.document_queue_stack.addWidget(self.document_patient_queue_list)
+        self.document_queue_stack.setMinimumHeight(58)
+        self.document_queue_stack.setMaximumHeight(98)
+        layout.addWidget(self.document_queue_stack)
+        layout.addStretch(1)
+
+        self.document_patient_mode_input.currentIndexChanged.connect(self.update_document_patient_mode)
+        self.update_document_patient_mode()
+        self.refresh_document_draft_status()
+        return panel
+
+    def update_document_patient_mode(self) -> None:
+        is_existing = self.document_patient_mode_input.currentData() == "existing"
+        for widget in (
+            self.document_identifier_type_input,
+            self.document_identifier_value_input,
+            self.document_identifier_type_label,
+            self.document_identifier_value_label,
+        ):
+            if widget is not None:
+                widget.setVisible(is_existing)
+
+    def select_document_draft_files(self) -> None:
+        from PySide6.QtWidgets import QFileDialog
+
+        start_dir = self.runtime.settings.ui.last_open_directory or str(Path.cwd())
+        file_paths, _ = QFileDialog.getOpenFileNames(
+            self.widget,
+            tr("select_documents", self.language),
+            start_dir,
+            "Documents (*.txt *.pdf *.png *.jpg *.jpeg *.docx *.doc *.odt *.rtf)",
+        )
+        if not file_paths:
+            return
+        self.add_document_draft_paths(file_paths)
+        self.runtime.settings.ui.last_open_directory = str(Path(file_paths[0]).resolve().parent)
+        settings_store = getattr(self.runtime, "settings_store", None)
+        if settings_store is not None:
+            settings_store.save(self.runtime.settings)
+
+    def add_document_draft_paths(self, file_paths: list[str]) -> None:
+        existing = set(self.document_draft_paths)
+        for file_path in file_paths:
+            normalized = str(Path(file_path).expanduser())
+            if not normalized or normalized in existing:
+                continue
+            existing.add(normalized)
+            self.document_draft_paths.append(normalized)
+            self.document_draft_list.addItem(normalized)
+        self.refresh_document_draft_status()
+
+    def remove_selected_document_drafts(self) -> None:
+        selected_paths = {item.text() for item in self.document_draft_list.selectedItems()}
+        if not selected_paths:
+            return
+        self.document_draft_paths = [path for path in self.document_draft_paths if path not in selected_paths]
+        self.refresh_document_draft_list()
+
+    def clear_document_draft(self) -> None:
+        self.document_draft_paths = []
+        self.refresh_document_draft_list()
+
+    def refresh_document_draft_list(self) -> None:
+        self.document_draft_list.clear()
+        self.document_draft_list.addItems(self.document_draft_paths)
+        self.refresh_document_draft_status()
+
+    def refresh_document_draft_status(self, message: str | None = None, *, tone: str = "neutral") -> None:
+        if message is None:
+            message = (
+                tr("documents_queued", self.language, count=len(self.document_draft_paths))
+                if self.document_draft_paths
+                else tr("patient_queue_requires_documents", self.language)
+            )
+        self.document_draft_status.setText(message)
+        self.document_draft_status.setProperty("tone", tone)
+        repolish(self.document_draft_status)
+
+    def reset_document_draft(self) -> None:
+        self.document_queue_label_input.clear()
+        self.document_patient_mode_input.setCurrentIndex(0)
+        self.document_identifier_type_input.setCurrentIndex(0)
+        self.document_identifier_value_input.clear()
+        self.document_draft_paths = []
+        self.document_draft_list.clear()
+        self.update_document_patient_mode()
+
+    def enqueue_document_draft(self) -> bool:
+        patient_mode = str(self.document_patient_mode_input.currentData() or "new")
+        identifier_type = (
+            str(self.document_identifier_type_input.currentData() or "record_id")
+            if patient_mode == "existing"
+            else None
+        )
+        identifier_value = (
+            self.document_identifier_value_input.text().strip()
+            if patient_mode == "existing"
+            else None
+        )
+        queue_label = self.document_queue_label_input.text().strip()
+        result = self.add_patient_documents(
+            queue_label=queue_label,
+            patient_mode=patient_mode,
+            identifier_type=identifier_type,
+            identifier_value=identifier_value,
+            documents=list(self.document_draft_paths),
+        )
+        if isinstance(result, tuple):
+            success, message = bool(result[0]), str(result[1] or "")
+        else:
+            success, message = bool(result), ""
+        if not success:
+            self.refresh_document_draft_status(
+                message or tr("patient_queue_requires_documents", self.language),
+                tone="error",
+            )
+            return False
+        self.reset_document_draft()
+        self.refresh_document_draft_status(
+            tr("clinical_document_patient_added", self.language),
+            tone="success",
+        )
+        self.refresh()
+        return True
 
     def build_excel_flow(self):
         from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QStackedWidget, QVBoxLayout, QWidget
@@ -1768,28 +2219,52 @@ class ClinicalImportPage:
         return [(tr("clinical_open_advanced", self.language), self.open_advanced, True)]
 
     def build_stepper(self, labels: list[str], flow: str):
-        from PySide6.QtWidgets import QFrame, QHBoxLayout, QPushButton
+        from PySide6.QtCore import Qt
+        from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 
         frame = QFrame()
         frame.setObjectName("Stepper")
         layout = QHBoxLayout(frame)
-        layout.setContentsMargins(12, 10, 12, 10)
+        layout.setContentsMargins(18, 10, 18, 9)
         layout.setSpacing(8)
         label_widgets = []
+        caption_widgets = []
+        connector_widgets = []
         for index, label in enumerate(labels, start=1):
-            item = QPushButton(f"{index}. {label}")
-            item.setObjectName("WizardStepPill")
+            item_shell = QWidget()
+            item_layout = QVBoxLayout(item_shell)
+            item_layout.setContentsMargins(0, 0, 0, 0)
+            item_layout.setSpacing(4)
+            item = QPushButton(str(index))
+            item.setObjectName("WizardStepCircle")
             item.setProperty("step", True)
+            item.setFixedSize(28, 28)
             if flow == "documents":
                 item.clicked.connect(lambda checked=False, step=index - 1: self.set_document_step(step))
             else:
                 item.clicked.connect(lambda checked=False, step=index - 1: self.set_excel_step(step))
-            layout.addWidget(item)
+            caption = QLabel(label)
+            caption.setObjectName("WizardStepCaption")
+            caption.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop)
+            item_layout.addWidget(item, 0, Qt.AlignmentFlag.AlignHCenter)
+            item_layout.addWidget(caption, 0, Qt.AlignmentFlag.AlignHCenter)
+            layout.addWidget(item_shell, 0)
             label_widgets.append(item)
+            caption_widgets.append(caption)
+            if index < len(labels):
+                connector = QFrame()
+                connector.setObjectName("WizardStepConnector")
+                connector.setFixedHeight(1)
+                layout.addWidget(connector, 1, Qt.AlignmentFlag.AlignVCenter)
+                connector_widgets.append(connector)
         if flow == "documents":
             self.document_step_labels = label_widgets
+            self.document_step_captions = caption_widgets
+            self.document_step_connectors = connector_widgets
         else:
             self.excel_step_labels = label_widgets
+            self.excel_step_captions = caption_widgets
+            self.excel_step_connectors = connector_widgets
         return frame
 
     def build_wizard_page(
@@ -1844,7 +2319,7 @@ class ClinicalImportPage:
         return result is not False
 
     def add_patient(self) -> bool:
-        added = self.run_action(self.add_patient_documents)
+        added = self.enqueue_document_draft()
         if added:
             self.set_document_step(0)
         return added
@@ -1894,10 +2369,15 @@ class ClinicalImportPage:
         self.document_patient_queue_list.clear()
         for summary in summaries:
             self.document_patient_queue_list.addItem(summary)
+        self.document_queue_stack.setCurrentIndex(1 if patient_count else 0)
+        queue_height = 58 if patient_count == 0 else min(98, max(58, 32 + (patient_count * 22)))
+        self.document_queue_stack.setFixedHeight(queue_height)
+        if hasattr(self, "document_remove_patient_button"):
+            self.document_remove_patient_button.setEnabled(
+                patient_count > 0 and self.document_patient_queue_list.currentRow() >= 0
+            )
         self.document_queue_status.setText(
-            tr("clinical_document_queue_status", self.language, count=patient_count)
-            if patient_count
-            else tr("clinical_document_queue_status_empty", self.language)
+            tr("patient_queue_count", self.language, count=patient_count)
         )
         self.document_scope_status.setText(self.get_scope_summary())
         self.document_review_status.setText(
@@ -1954,12 +2434,25 @@ class ClinicalImportPage:
         self.excel_review_status.setText(tr("clinical_excel_review_status", self.language))
 
     def update_step_labels(self, labels: list[Any], active_index: int) -> None:
+        if labels is self.document_step_labels:
+            captions = getattr(self, "document_step_captions", [])
+            connectors = getattr(self, "document_step_connectors", [])
+        else:
+            captions = getattr(self, "excel_step_captions", [])
+            connectors = getattr(self, "excel_step_connectors", [])
         for index, label in enumerate(labels):
             label.setProperty("active", index == active_index)
             label.setProperty("complete", index < active_index)
             label.setEnabled(index <= active_index)
             label.style().unpolish(label)
             label.style().polish(label)
+            if index < len(captions):
+                captions[index].setProperty("active", index == active_index)
+                captions[index].setProperty("complete", index < active_index)
+                repolish(captions[index])
+        for index, connector in enumerate(connectors):
+            connector.setProperty("complete", index < active_index)
+            repolish(connector)
 
 
 def build_workflow_card(title: str, body: str, primary_label: str, primary_action: Callable[[], None]):
@@ -2014,13 +2507,14 @@ def build_dashboard_metric_card(label: str, value_label: Any, note: str):
 
 def build_dashboard_action_card(
     *,
-    code: str,
+    icon_name: str,
     title: str,
     body: str,
     primary_label: str,
     primary_action: Callable[[], None],
 ):
-    from PySide6.QtCore import Qt
+    from PySide6.QtCore import QSize, Qt
+    from PySide6.QtGui import QIcon
     from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout
 
     card = QFrame()
@@ -2031,9 +2525,10 @@ def build_dashboard_action_card(
     heading = QHBoxLayout()
     heading.setContentsMargins(0, 0, 0, 0)
     heading.setSpacing(9)
-    badge = QLabel(code)
+    badge = QLabel("")
     badge.setObjectName("DashboardActionBadge")
     badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    badge.setPixmap(QIcon(clinical_asset_path(icon_name)).pixmap(QSize(18, 18)))
     heading.addWidget(badge, 0, Qt.AlignmentFlag.AlignTop)
     title_label = QLabel(title)
     title_label.setObjectName("DashboardActionTitle")
@@ -2151,6 +2646,8 @@ def redcap_dag_option_to_dict(option: Any) -> dict[str, Any]:
 
 
 def configure_dag_switch_combo(combo: Any, project: RedcapProjectToken | None, language: str) -> None:
+    from PySide6.QtCore import Qt
+
     combo.blockSignals(True)
     combo.clear()
     options = list(getattr(project, "available_data_access_groups", []) or []) if project is not None else []
@@ -2166,12 +2663,108 @@ def configure_dag_switch_combo(combo: Any, project: RedcapProjectToken | None, l
             continue
         normalized = normalize_dag_option(option, project)
         combo.addItem(dag_option_label(normalized, language), normalized)
+        combo.setItemData(
+            combo.count() - 1,
+            combo.itemText(combo.count() - 1),
+            Qt.ItemDataRole.ToolTipRole,
+        )
         if normalized.get("active"):
             active_index = combo.count() - 1
     combo.setCurrentIndex(active_index)
     combo.setEnabled(any(not item.get("active") and item.get("switchable") for item in combo_item_data(combo)))
     combo.setVisible(combo.count() > 1)
+    combo.setToolTip(combo.currentText())
+    configure_combo_popup_width(combo)
     combo.blockSignals(False)
+
+
+def configure_combo_popup_width(combo: Any, *, maximum: int = 440) -> None:
+    from PySide6.QtCore import Qt
+    from PySide6.QtGui import QColor, QPalette
+    from PySide6.QtWidgets import QAbstractItemView, QListView, QProxyStyle, QStyle
+
+    from gui.clinical_styles import (
+        CLINICAL_COMBO_POPUP_CONTAINER_STYLE,
+        CLINICAL_COMBO_POPUP_STYLE,
+    )
+
+    view = combo.view()
+    if view is None:
+        return
+
+    # QMacStyle reports SH_ComboBox_Popup=True and turns a normal combo view
+    # into a menu-like native popup. That popup does not reliably inherit the
+    # application's light QSS/palette and it ignores the view width, which is
+    # why long project/DAG names appeared inside a dark, clipped panel.
+    if getattr(combo, "_clinical_popup_style", None) is None:
+        class _ClinicalComboPopupStyle(QProxyStyle):
+            def styleHint(self, hint, option=None, widget=None, return_data=None):  # noqa: N802
+                if hint == QStyle.StyleHint.SH_ComboBox_Popup:
+                    return 0
+                return super().styleHint(hint, option, widget, return_data)
+
+        popup_style = _ClinicalComboPopupStyle()
+        popup_style.setParent(combo)
+        combo._clinical_popup_style = popup_style
+        combo.setStyle(popup_style)
+
+    combo.setAttribute(Qt.WidgetAttribute.WA_MacShowFocusRect, False)
+    view.setObjectName("ClinicalComboPopup")
+    view.setStyleSheet(CLINICAL_COMBO_POPUP_STYLE)
+    view.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+    view.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+    view.setTextElideMode(Qt.TextElideMode.ElideRight)
+    view.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+    view.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+    view.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+    view.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+    view.setAttribute(Qt.WidgetAttribute.WA_MacShowFocusRect, False)
+    if isinstance(view, QListView):
+        view.setUniformItemSizes(True)
+
+    palette = QPalette(combo.palette())
+    white = QColor("#ffffff")
+    ink = QColor("#0f172a")
+    muted = QColor("#94a3b8")
+    selected = QColor("#ccfbf1")
+    for group in (QPalette.ColorGroup.Active, QPalette.ColorGroup.Inactive):
+        palette.setColor(group, QPalette.ColorRole.Base, white)
+        palette.setColor(group, QPalette.ColorRole.AlternateBase, white)
+        palette.setColor(group, QPalette.ColorRole.Window, white)
+        palette.setColor(group, QPalette.ColorRole.Text, ink)
+        palette.setColor(group, QPalette.ColorRole.WindowText, ink)
+        palette.setColor(group, QPalette.ColorRole.Highlight, selected)
+        palette.setColor(group, QPalette.ColorRole.HighlightedText, ink)
+    palette.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.Text, muted)
+    palette.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.WindowText, muted)
+    view.setPalette(palette)
+    view.viewport().setPalette(palette)
+    view.viewport().setAutoFillBackground(True)
+
+    popup_window = view.window()
+    if popup_window is not combo:
+        popup_window.setObjectName("ClinicalComboPopupContainer")
+        popup_window.setPalette(palette)
+        popup_window.setAutoFillBackground(True)
+        popup_window.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        popup_window.setStyleSheet(CLINICAL_COMBO_POPUP_CONTAINER_STYLE)
+
+    if combo.count() == 0:
+        return
+    metrics = combo.fontMetrics()
+    content_width = max(metrics.horizontalAdvance(combo.itemText(index)) for index in range(combo.count())) + 52
+    screen = combo.screen()
+    screen_limit = screen.availableGeometry().width() - 32 if screen is not None else maximum
+    effective_maximum = max(120, min(maximum, screen_limit))
+    popup_width = min(
+        max(combo.width(), combo.minimumSizeHint().width(), content_width),
+        effective_maximum,
+    )
+    view.setMinimumWidth(popup_width)
+    view.setMaximumWidth(popup_width)
+    if combo.currentIndex() >= 0:
+        current = combo.model().index(combo.currentIndex(), combo.modelColumn())
+        view.setCurrentIndex(current)
 
 
 def combo_item_data(combo: Any) -> list[dict[str, Any]]:

@@ -6,6 +6,7 @@ OPENAI_COMPATIBLE_PROVIDER_NAMES = {"openai", "openai_compatible", "openrouter"}
 GATEWAY_PROVIDER_NAMES = {"llm_gateway", "managed_gateway"}
 REMOTE_CHAT_PROVIDER_NAMES = OPENAI_COMPATIBLE_PROVIDER_NAMES | GATEWAY_PROVIDER_NAMES
 DIRECT_SECRET_KEYS = {"api_key", "gateway_client_token"}
+DEFAULT_OPENROUTER_MODEL = "deepseek/deepseek-v4-flash"
 
 
 def managed_llm_settings_from_config(app_config: dict[str, Any] | None) -> dict[str, Any] | None:

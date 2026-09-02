@@ -34,7 +34,9 @@ cd gateway
 npx --yes wrangler@latest login
 ```
 
-`wrangler.toml` public repoya girebilir; içinde secret yoktur. Gerekirse `name`, `DEFAULT_MODEL`, `MAX_TOKENS`, `DEFAULT_REASONING_EFFORT` ve `REQUIRE_CLIENT_TOKEN` değerlerini düzenleyin. Qwen modellerinde gereksiz düşünme çıktısını ve maliyeti azaltmak için varsayılan reasoning ayarı `none` olarak tutulur.
+`wrangler.toml` public repoya girebilir; içinde secret yoktur. Gerekirse `name`, `DEFAULT_MODEL`, `MAX_TOKENS`, `DEFAULT_REASONING_EFFORT`, `IGNORED_PROVIDERS` ve `REQUIRE_CLIENT_TOKEN` değerlerini düzenleyin. Yapılandırılmış klinik veri çıkarımında gereksiz düşünme çıktısını ve maliyeti azaltmak için varsayılan reasoning ayarı `none` olarak tutulur. Gateway ayrıca JSON şeması gibi istek parametrelerini desteklemeyen OpenRouter sağlayıcılarını `provider.require_parameters=true` ile rotadan çıkarır. `IGNORED_PROVIDERS`, semantik şema doğrulamasında güvenilmez olduğu doğrulanan sağlayıcıları virgülle ayrılmış OpenRouter slug'larıyla dışlar; DeepSeek V4 Flash için varsayılan olarak `alibaba` dışlanır.
+
+Varsayılan `deepseek/deepseek-v4-flash` modeli yalnızca metin girdisi kabul eder. Masaüstü uygulama PDF, Word ve görüntü dosyalarını önce yerel olarak metne/OCR çıktısına dönüştürdüğü için modele ham görüntü gönderilmez.
 
 Secret değerlerini dosyaya yazmayın. Bunları Cloudflare secret olarak kaydedin:
 
@@ -46,6 +48,8 @@ npx --yes wrangler@latest secret put CLIENT_TOKEN
 `CLIENT_TOKEN` erken test için basit gateway erişim kontrolüdür. Final mimaride bunun yerine kullanıcı/proje bazlı aktivasyon ve merkezi rate limit mekanizması tercih edilmelidir. Bu token OpenRouter key değildir; sızsa bile OpenRouter secret'ı açığa çıkmaz, ancak gateway kullanımını kötüye kullanmaya izin verebilir.
 
 `REQUIRE_CLIENT_TOKEN=false` erken uçtan uca testte son kullanıcının token girmeden gateway'i denemesi içindir. Public kullanımda bu ayar açık bırakılmamalı; rate limit ve aktivasyon eklendiğinde tekrar `true` yapılmalıdır.
+
+`REQUIRE_CLIENT_TOKEN=true` iken `CLIENT_TOKEN` secret'ı eksikse Worker güvenli biçimde isteği reddeder ve `503` döndürür. Böylece eksik deploy yapılandırması gateway'i yanlışlıkla anonim erişime açmaz.
 
 Deploy:
 
@@ -68,7 +72,7 @@ curl https://<gateway-domain>/v1/chat/completions \
   -H "Authorization: Bearer <CLIENT_TOKEN>" \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "qwen/qwen3.5-9b",
+    "model": "deepseek/deepseek-v4-flash",
     "messages": [{"role": "user", "content": "Sadece JSON döndür: {\"ok\": true}"}],
     "reasoning": {"effort": "none", "exclude": true},
     "temperature": 0,
@@ -90,7 +94,7 @@ Gateway hazır olduğunda uygulama ayarı şu şekle çevrilecek:
 "llm": {
   "provider": "llm_gateway",
   "base_url": "https://<gateway-domain>/v1",
-  "model": "qwen/qwen3.5-9b",
+  "model": "deepseek/deepseek-v4-flash",
   "temperature": 0,
   "max_tokens": 8192,
   "timeout_seconds": 120,

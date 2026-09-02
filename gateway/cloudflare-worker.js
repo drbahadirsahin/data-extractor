@@ -1,7 +1,8 @@
 const OPENROUTER_CHAT_COMPLETIONS_URL = "https://openrouter.ai/api/v1/chat/completions";
-const DEFAULT_MODEL = "qwen/qwen3.5-9b";
+const DEFAULT_MODEL = "deepseek/deepseek-v4-flash";
 const DEFAULT_MAX_TOKENS = 8192;
 const DEFAULT_REASONING_EFFORT = "none";
+const DEFAULT_IGNORED_PROVIDERS = "alibaba";
 
 export default {
   async fetch(request, env) {
@@ -77,7 +78,7 @@ function validateClientAuth(request, env) {
   }
   const requiredToken = String(env.CLIENT_TOKEN || "").trim();
   if (!requiredToken) {
-    return null;
+    return jsonError("Gateway client authentication is not configured.", 503);
   }
   const header = request.headers.get("Authorization") || "";
   const providedToken = header.replace(/^Bearer\s+/i, "").trim();
@@ -90,6 +91,19 @@ function validateClientAuth(request, env) {
 function applyGatewayPolicy(payload, env) {
   payload.stream = false;
   payload.model = String(env.DEFAULT_MODEL || DEFAULT_MODEL);
+  const requestedProvider =
+    payload.provider && typeof payload.provider === "object" && !Array.isArray(payload.provider)
+      ? payload.provider
+      : {};
+  const ignoredProviders = uniqueStrings([
+    ...(Array.isArray(requestedProvider.ignore) ? requestedProvider.ignore : []),
+    ...parseStringList(env.IGNORED_PROVIDERS || DEFAULT_IGNORED_PROVIDERS),
+  ]);
+  payload.provider = {
+    ...requestedProvider,
+    require_parameters: true,
+    ...(ignoredProviders.length ? { ignore: ignoredProviders } : {}),
+  };
 
   const maxTokens = parsePositiveInteger(env.MAX_TOKENS, DEFAULT_MAX_TOKENS);
   payload.max_tokens = Math.min(parsePositiveInteger(payload.max_tokens, maxTokens), maxTokens);
@@ -119,6 +133,17 @@ function parsePositiveInteger(value, fallback) {
     return fallback;
   }
   return parsed;
+}
+
+function parseStringList(value) {
+  return String(value || "")
+    .split(",")
+    .map((item) => item.trim().toLowerCase())
+    .filter(Boolean);
+}
+
+function uniqueStrings(values) {
+  return [...new Set(values.map((value) => String(value || "").trim().toLowerCase()).filter(Boolean))];
 }
 
 function jsonResponse(payload, status = 200) {

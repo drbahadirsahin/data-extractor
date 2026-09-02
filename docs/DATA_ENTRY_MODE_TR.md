@@ -1,6 +1,6 @@
 # Veri Giriş Modu Tasarımı
 
-Bu doküman `codex/data-entry-mode` branch'i için geliştirme notudur. Amaç, mevcut belge/Excel çıkarım uygulamasını aşamalı olarak offline-first REDCap veri giriş arayüzüne dönüştürmektir. `main` branch public release hattı olarak kalır; bu mod olgunlaşana kadar release'e alınmaz.
+Bu doküman, `0.2.0-early.1` ile ana uygulamaya alınan offline-first REDCap veri giriş modunun mimari ve iş akışı notlarını içerir. Mod; kayıt senkronizasyonu, metadata tabanlı form düzenleme, tekrar eden event/form bağlamları, yerel değişiklik kuyruğu ve REDCap'e gönderim akışını kapsar.
 
 ## Hedef İş Akışı
 
@@ -281,44 +281,45 @@ Bu kurallar proje dosyasına kalıcı yazılmaz; ilgili tarama çalışması iç
 geçici scoped config içine eklenir. Ağ tarafında `connection reset` benzeri
 geçici kopmalarda tek kontrollü tekrar denemesi yapılır.
 
-## Repeating Event/Form Durumu
+## Tekrarlayan Event/Form Durumu
 
-Lokal veri modeli REDCap'in tekrar eden yapılarına hazırlanmış durumda:
+Lokal veri modeli ve form arayüzü REDCap'in tekrar eden yapılarını bağlamı kaybetmeden işler:
 
 - `redcap_data_values` anahtarı `project_id, event_id, record, field_name,
   instance` kolonlarını içerir.
 - `pending_changes` aynı şekilde `event_id` ve `instance` saklar.
-- Gönderim payload'ı `instance` varsa `redcap_repeat_instance` yazabilir ve
+- Gönderim payload'ı `instance` varsa `redcap_repeat_instance` yazar ve
   proje konfigürasyonundaki `repeating_forms` bilgisiyle
   `redcap_repeat_instrument` üretebilir.
-
-Ancak form renderer tarafı henüz tam repeating UI değildir. Aynı alan birden
-fazla event veya instance altında geldiğinde mevcut ekran tek bir tercih edilen
-değeri gösterir. Bu yüzden repeating yapı için sonraki zorunlu adım şudur:
-
-- Form listesinde `form + event + instance` bağlamını ayrı ayrı göstermek.
-- Widget anahtarlarını sadece `field_name` yerine `field_name + event_id +
-  instance` olarak yönetmek.
-- Kullanıcının aynı formun farklı instance'larını ekleyebilmesi, kopyalayabilmesi
-  ve silebilmesi.
-- Gönderimde her bağlamı ayrı REDCap import satırına dönüştürmek.
-
-Bu yapılmadan repeating form/event düzenleme davranışı tamamlanmış kabul
-edilmemelidir.
+- Sol gezinmede eventler REDCap metadata sırasıyla ve açılır/kapanır gruplar
+  halinde gösterilir.
+- Tekrarlanabilir event ve formlar kendi satırlarındaki `+` eylemiyle yeni
+  instance oluşturur; ayrı bir alt panel gerektirmez.
+- Form ve widget anahtarları `form + event + instance` bağlamını korur; aynı
+  alanın farklı tekrarları birbirinin değerini ezmez.
+- Form durumları, zorunlu alanların doluluğuna göre hesaplanır ve tekrar
+  instance'ları ayrı durum taşır.
+- Gönderimde her bağlam ayrı REDCap import satırına dönüştürülür.
 
 `data_entry_form_changes.py` formdan gelen değerleri mevcut form modeliyle
 karşılaştırır. Sadece değişen editlenebilir alanlar `pending_changes` kuyruğuna
 yazılır; read-only ve descriptive alanlar atlanır. Checkbox alanları REDCap flat
 formatına uygun olarak `field___code` değişikliklerine ayrılır.
 
-Lokal görsel deneme:
+Lokal görsel deneme ve regresyon önizlemeleri:
 
 ```bash
 .venv/bin/python scripts/demo_data_entry_form.py
+.venv/bin/python scripts/render_clinical_ui.py
+.venv/bin/python scripts/render_data_entry_form.py --output build/data-entry-form.png
 ```
 
 Demo penceresinde bir alanı değiştirip `Queue local changes` düğmesine basarak
 lokal pending queue davranışı görülebilir.
+
+Uygulanan form görsel yönünün ImageGen referansı:
+
+![Veri giriş formu tasarım konsepti](design/data-entry-form-imagegen-v1.png)
 
 ## Geliştirme Sırası
 

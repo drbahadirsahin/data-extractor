@@ -3,9 +3,10 @@ main = "cloudflare-worker.js"
 compatibility_date = "2026-05-19"
 
 [vars]
-DEFAULT_MODEL = "qwen/qwen3.5-9b"
+DEFAULT_MODEL = "deepseek/deepseek-v4-flash"
 MAX_TOKENS = "8192"
 DEFAULT_REASONING_EFFORT = "none"
+IGNORED_PROVIDERS = "alibaba"
 REQUIRE_CLIENT_TOKEN = "true"
 OPENROUTER_HTTP_REFERER = "https://github.com/drbahadirsahin/data-extractor"
 OPENROUTER_APP_TITLE = "LLM Extractor"

@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
@@ -404,8 +405,13 @@ class GuiAppTests(unittest.TestCase):
         )
 
         self.assertTrue(page.document_identifier_value_input.isHidden())
-        page.add_document_draft_paths(["/tmp/a.pdf", "/tmp/a.pdf", "/tmp/b.png"])
-        self.assertEqual(page.document_draft_paths, ["/tmp/a.pdf", "/tmp/b.png"])
+        input_paths = ["/tmp/a.pdf", "/tmp/a.pdf", "/tmp/b.png"]
+        expected_paths = [
+            str(Path("/tmp/a.pdf").expanduser()),
+            str(Path("/tmp/b.png").expanduser()),
+        ]
+        page.add_document_draft_paths(input_paths)
+        self.assertEqual(page.document_draft_paths, expected_paths)
         page.document_patient_mode_input.setCurrentIndex(
             page.document_patient_mode_input.findData("existing")
         )
@@ -418,7 +424,7 @@ class GuiAppTests(unittest.TestCase):
 
         self.assertTrue(page.enqueue_document_draft())
         self.assertEqual(state["patients"], 1)
-        self.assertEqual(state["payloads"][-1]["documents"], ["/tmp/a.pdf", "/tmp/b.png"])
+        self.assertEqual(state["payloads"][-1]["documents"], expected_paths)
         self.assertEqual(state["payloads"][-1]["identifier_type"], "record_id")
         self.assertEqual(state["payloads"][-1]["queue_label"], "Kontrol hastası")
         self.assertEqual(page.document_draft_paths, [])
